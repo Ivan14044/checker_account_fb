@@ -7,6 +7,7 @@ const statsEl = document.getElementById('stats');
 const preloader = document.getElementById('preloader');
 const errorEl = document.getElementById('error');
 const toastEl = document.getElementById('toast');
+const langButtons = document.querySelectorAll('.lang-btn');
 
 // ID regex: accounts start with 10 or 61 followed by 10-23 alnum chars
 const idRegex = /(\b(?:10|61)[0-9A-Za-z]{10,23}\b)/g;
@@ -175,7 +176,8 @@ checkBtn.addEventListener('click', async () => {
     const pb = total ? Math.round((uniqueBlocked.length / total) * 1000) / 10 : 0;
     const dupCount = dupLines.length;
     const dupInfo = dupCount ? `, дубли строк: ${dupCount}` : '';
-    statsEl.innerHTML = `<span class=\"summary\">Итог — <span class=\"ok\">валидных: ${uniqueValid.length} (${pv}%)</span>, <span class=\"bad\">заблокировано: ${uniqueBlocked.length} (${pb}%)</span>${dupInfo}</span>`;
+    const dict = showToast.messages || I18N[detectLang()];
+    statsEl.innerHTML = `<span class=\"summary\">${dict.summaryPrefix} <span class=\"ok\">${dict.validWord}: ${uniqueValid.length} (${pv}%)</span>, <span class=\"bad\">${dict.blockedWord}: ${uniqueBlocked.length} (${pb}%)</span>${dupInfo}</span>`;
     const resultsBlock = document.getElementById('results');
     if(resultsBlock) resultsBlock.classList.remove('hidden');
   }catch(err){
@@ -231,9 +233,10 @@ function copyField(id){
   const el = getFieldById(id);
   if(!el) return;
   navigator.clipboard.writeText(el.value || '').then(() => {
-    showToast('Скопировано в буфер обмена', 'success');
+    const dict = showToast.messages || I18N[detectLang()];
+    showToast(dict.copied, 'success');
   }).catch(() => {
-    showToast('Не удалось скопировать', 'info');
+    showToast('Clipboard error', 'info');
   });
 }
 function saveField(id){
@@ -271,7 +274,8 @@ if(clearAllBtn){
     if(resultsBlock) resultsBlock.classList.add('hidden');
     updateInputStats();
     keepStartVisible(inputEl);
-    showToast('Очищено', 'info');
+    const dict = showToast.messages || I18N[detectLang()];
+    showToast(dict.cleared, 'info');
   });
 }
 
@@ -290,5 +294,86 @@ function showToast(message, variant){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
 }
+
+// i18n
+const I18N = {
+  ru: {
+    heroTitle: 'Чекер аккаунтов Facebook',
+    heroP1: 'Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.',
+    heroP2: 'Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.',
+    inputLabel: 'Вставьте строки (по одной на строке):',
+    checkBtn: 'Проверить аккаунты',
+    clearBtn: 'Очистить всё',
+    validLabel: 'Валидные',
+    invalidLabel: 'Невалидные/Заблокированные',
+    dupesLabel: 'Дубли (ID повторяются)',
+    copied: 'Скопировано в буфер обмена',
+    cleared: 'Очищено',
+    summaryPrefix: 'Итог —',
+    validWord: 'валидных',
+    blockedWord: 'заблокировано'
+  },
+  uk: {
+    heroTitle: 'Чекер акаунтів Facebook',
+    heroP1: 'Інструмент для швидкої перевірки стану ваших акаунтів Facebook.',
+    heroP2: 'Вставте список акаунтів у поле та натисніть «Перевірити акаунти». Система визначить, які акаунти активні, заблоковані або потребують підтвердження.',
+    inputLabel: 'Вставте рядки (по одному на рядок):',
+    checkBtn: 'Перевірити акаунти',
+    clearBtn: 'Очистити все',
+    validLabel: 'Валідні',
+    invalidLabel: 'Невалідні/Заблоковані',
+    dupesLabel: 'Дублі (ID повторюються)',
+    copied: 'Скопійовано у буфер',
+    cleared: 'Очищено',
+    summaryPrefix: 'Підсумок —',
+    validWord: 'валідних',
+    blockedWord: 'заблоковано'
+  },
+  en: {
+    heroTitle: 'Facebook Accounts Checker',
+    heroP1: 'A tool to quickly check the status of your Facebook accounts.',
+    heroP2: 'Paste the list of accounts and click “Check accounts”. The system will detect which are active, blocked or require verification.',
+    inputLabel: 'Paste lines (one per line):',
+    checkBtn: 'Check accounts',
+    clearBtn: 'Clear all',
+    validLabel: 'Valid',
+    invalidLabel: 'Invalid/Blocked',
+    dupesLabel: 'Duplicates (IDs repeated)',
+    copied: 'Copied to clipboard',
+    cleared: 'Cleared',
+    summaryPrefix: 'Summary —',
+    validWord: 'valid',
+    blockedWord: 'blocked'
+  }
+};
+
+function detectLang(){
+  try{
+    const saved = localStorage.getItem('lang');
+    if(saved && I18N[saved]) return saved;
+  }catch(_){ }
+  const nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+  if(nav.startsWith('ru')) return 'ru';
+  if(nav.startsWith('uk') || nav.startsWith('ua')) return 'uk';
+  return 'en';
+}
+
+function applyLang(lang){
+  const dict = I18N[lang] || I18N.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if(dict[key]) el.textContent = dict[key];
+  });
+  // update toasts messages references
+  showToast.messages = dict;
+  // update active button
+  langButtons.forEach(b => b.classList.toggle('active', b.getAttribute('data-lang') === lang));
+  try{ localStorage.setItem('lang', lang); }catch(_){ }
+}
+
+langButtons.forEach(btn => btn.addEventListener('click', () => applyLang(btn.getAttribute('data-lang'))));
+
+const initialLang = detectLang();
+applyLang(initialLang);
 
 

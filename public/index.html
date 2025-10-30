@@ -39,6 +39,11 @@
       <div id="error" class="error hidden" role="alert"></div>
       <section class="hero-card">
         <div class="hero-left">
+          <div class="hero-lang" role="group" aria-label="Language switch">
+            <button class="lang-btn" data-lang="ru" title="Русский">🇷🇺</button>
+            <button class="lang-btn" data-lang="uk" title="Українська">🇺🇦</button>
+            <button class="lang-btn" data-lang="en" title="English">🇬🇧</button>
+          </div>
           <span class="hero-icon" aria-hidden="true">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M8 3h6l4 4v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" fill="#A3E08F" stroke="#0F172A" stroke-width="1.6"/>
@@ -48,9 +53,9 @@
             </svg>
           </span>
           <div class="hero-text">
-            <h2>Чекер аккаунтов Facebook</h2>
-            <p>Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.</p>
-            <p>Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.</p>
+            <h2 data-i18n="heroTitle">Чекер аккаунтов Facebook</h2>
+            <p data-i18n="heroP1">Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.</p>
+            <p data-i18n="heroP2">Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.</p>
           </div>
         </div>
         <div class="hero-right" aria-hidden="true">Место под баннер (реклама)</div>
@@ -58,17 +63,17 @@
       <h1 class="sr-only">Чекер аккаунтов Facebook</h1>
       <div class="grid">
         <div class="card">
-          <label for="input">Вставьте строки (по одной на строке):</label>
+          <label for="input" data-i18n="inputLabel">Вставьте строки (по одной на строке):</label>
           <textarea id="input" class="shiny-field" placeholder="Вставьте данные с ID..." spellcheck="false" wrap="off"></textarea>
           <div class="controls">
-            <button id="checkBtn" class="btn">Проверить аккаунты</button>
-            <button id="clearAll" class="btn btn--alt">Очистить всё</button>
+            <button id="checkBtn" class="btn" data-i18n="checkBtn">Проверить аккаунты</button>
+            <button id="clearAll" class="btn btn--alt" data-i18n="clearBtn">Очистить всё</button>
             <span id="stats"></span>
           </div>
         </div>
         <div id="results" class="hidden">
           <div class="card">
-            <label for="valid">Валидные</label>
+            <label for="valid" data-i18n="validLabel">Валидные</label>
             <div class="field-actions">
               <button data-action="copy" data-target="valid" class="icon-btn btn btn--sm" title="Скопировать">📋</button>
               <button data-action="save" data-target="valid" class="icon-btn btn btn--sm" title="Сохранить .txt">💾</button>
@@ -76,7 +81,7 @@
             <textarea id="valid" class="shiny-field" readonly wrap="off"></textarea>
           </div>
           <div class="card">
-            <label for="invalid">Невалидные/Заблокированные</label>
+            <label for="invalid" data-i18n="invalidLabel">Невалидные/Заблокированные</label>
             <div class="field-actions">
               <button data-action="copy" data-target="invalid" class="icon-btn btn btn--sm" title="Скопировать">📋</button>
               <button data-action="save" data-target="invalid" class="icon-btn btn btn--sm" title="Сохранить .txt">💾</button>
@@ -84,7 +89,7 @@
             <textarea id="invalid" class="shiny-field" readonly wrap="off"></textarea>
           </div>
           <div class="card">
-            <label for="dupes">Дубли (ID повторяются)</label>
+            <label for="dupes" data-i18n="dupesLabel">Дубли (ID повторяются)</label>
             <div class="field-actions">
               <button data-action="copy" data-target="dupes" class="icon-btn btn btn--sm" title="Скопировать">📋</button>
               <button data-action="save" data-target="dupes" class="icon-btn btn btn--sm" title="Сохранить .txt">💾</button>

@@ -51,7 +51,11 @@ h1{margin:0 0 16px 0;font-size:24px;font-weight:700}
 }
 /* Hero card */
 .hero-card{display:grid;grid-template-columns:1fr 300px;gap:16px;background:#ffffff;border:1px solid #e6ebf6;border-radius:12px;padding:16px;box-shadow:0 6px 14px rgba(2,6,23,0.04);margin-bottom:16px}
-.hero-left{display:flex;gap:14px;align-items:flex-start}
+.hero-left{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.hero-lang{display:flex;gap:6px}
+.lang-btn{border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:6px 8px;cursor:pointer;font-size:16px}
+.lang-btn.active{outline:2px solid #2563eb}
+.hero-row{display:flex;gap:14px;align-items:flex-start}
 .hero-icon{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:14px;background:#eff6ff;border:1px solid #e5ecff}
 .hero-text h2{margin:0 0 6px 0;font-size:22px;color:#0f172a}
 .hero-text p{margin:4px 0;color:#475467;line-height:1.5}
