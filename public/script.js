@@ -51,6 +51,7 @@ async function checkIds(ids){
   // Warm-up ping to wake Render free instance, with retries
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   try{
+    statsEl.textContent = (showToast.messages || I18N[detectLang()]).waking || 'Waking server...';
     await warmUp(`${base}/api/ping`);
   }catch(_e){ /* ignore, request below will surface error */ }
 
@@ -58,13 +59,11 @@ async function checkIds(ids){
   const payload = { inputData: ids, checkFriends: false, userLang: 'en' };
 
   const url = `${base}/api/check/account`;
-  const response = await fetch(url, {
+  const text = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload)
-  });
-
-  const text = await response.text();
+  }, 4, 12000); // up to ~36s with backoff
 
   // Heuristic parsing: we expect per-line statuses or a JSON string.
   // Try JSON first; if it fails, fall back to searching by status tokens.
@@ -107,19 +106,38 @@ async function checkIds(ids){
 }
 
 async function warmUp(pingUrl){
-  const attempts = 3;
+  const attempts = 5;
   let lastErr;
   for(let i=0;i<attempts;i++){
     try{
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 3500);
+      const t = setTimeout(() => ctrl.abort(), 5000);
       const r = await fetch(pingUrl, { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(t);
       if(r.ok) return;
     }catch(err){ lastErr = err; }
-    await new Promise(res => setTimeout(res, 800 * (i + 1)));
+    await new Promise(res => setTimeout(res, 1000 * (i + 1)));
   }
   if(lastErr) throw lastErr;
+}
+
+async function fetchWithRetry(url, options, attempts = 3, timeoutMs = 10000){
+  let lastErr;
+  for(let i=0;i<attempts;i++){
+    try{
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const resp = await fetch(url, { ...options, signal: ctrl.signal });
+      clearTimeout(t);
+      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return await resp.text();
+    }catch(err){
+      lastErr = err;
+      // backoff
+      await new Promise(res => setTimeout(res, 1000 * Math.pow(2, i)));
+    }
+  }
+  throw lastErr || new Error('NetworkError');
 }
 
 checkBtn.addEventListener('click', async () => {
@@ -181,9 +199,10 @@ checkBtn.addEventListener('click', async () => {
     const resultsBlock = document.getElementById('results');
     if(resultsBlock) resultsBlock.classList.remove('hidden');
   }catch(err){
-    statsEl.textContent = 'Ошибка проверки: ' + String(err);
+    const dict = showToast.messages || I18N[detectLang()];
+    statsEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
     if(errorEl){
-      errorEl.textContent = 'Ошибка: ' + String(err);
+      errorEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
       errorEl.classList.remove('hidden');
     }
   }finally{
@@ -311,7 +330,9 @@ const I18N = {
     cleared: 'Очищено',
     summaryPrefix: 'Итог —',
     validWord: 'валидных',
-    blockedWord: 'заблокировано'
+    blockedWord: 'заблокировано',
+    waking: 'Пробуждение сервера…',
+    networkError: 'Сетевой сбой. Попробуйте ещё раз'
   },
   uk: {
     heroTitle: 'Чекер акаунтів Facebook',
@@ -327,7 +348,9 @@ const I18N = {
     cleared: 'Очищено',
     summaryPrefix: 'Підсумок —',
     validWord: 'валідних',
-    blockedWord: 'заблоковано'
+    blockedWord: 'заблоковано',
+    waking: 'Пробудження сервера…',
+    networkError: 'Помилка мережі. Спробуйте ще раз'
   },
   en: {
     heroTitle: 'Facebook Accounts Checker',
@@ -343,7 +366,9 @@ const I18N = {
     cleared: 'Cleared',
     summaryPrefix: 'Summary —',
     validWord: 'valid',
-    blockedWord: 'blocked'
+    blockedWord: 'blocked',
+    waking: 'Warming up server…',
+    networkError: 'Network error. Please retry'
   }
 };
 
