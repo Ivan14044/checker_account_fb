@@ -47,10 +47,15 @@ async function checkIds(ids){
     return { valid: [], blocked: [] };
   }
 
+  // Warm-up ping to wake Render free instance, with retries
+  const base = (window.PROXY_BASE || '').replace(/\/$/, '');
+  try{
+    await warmUp(`${base}/api/ping`);
+  }catch(_e){ /* ignore, request below will surface error */ }
+
   // The remote API accepts an array in "inputData".
   const payload = { inputData: ids, checkFriends: false, userLang: 'en' };
 
-  const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   const url = `${base}/api/check/account`;
   const response = await fetch(url, {
     method: 'POST',
@@ -98,6 +103,22 @@ async function checkIds(ids){
     }
   }
   return mapped;
+}
+
+async function warmUp(pingUrl){
+  const attempts = 3;
+  let lastErr;
+  for(let i=0;i<attempts;i++){
+    try{
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3500);
+      const r = await fetch(pingUrl, { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      if(r.ok) return;
+    }catch(err){ lastErr = err; }
+    await new Promise(res => setTimeout(res, 800 * (i + 1)));
+  }
+  if(lastErr) throw lastErr;
 }
 
 checkBtn.addEventListener('click', async () => {
