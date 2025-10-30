@@ -6,6 +6,7 @@ const checkBtn = document.getElementById('checkBtn');
 const statsEl = document.getElementById('stats');
 const preloader = document.getElementById('preloader');
 const errorEl = document.getElementById('error');
+const toastEl = document.getElementById('toast');
 
 // ID regex: accounts start with 10 or 61 followed by 10-23 alnum chars
 const idRegex = /(\b(?:10|61)[0-9A-Za-z]{10,23}\b)/g;
@@ -208,7 +209,11 @@ function getFieldById(id){ return document.getElementById(id); }
 function copyField(id){
   const el = getFieldById(id);
   if(!el) return;
-  navigator.clipboard.writeText(el.value || '').catch(()=>{});
+  navigator.clipboard.writeText(el.value || '').then(() => {
+    showToast('Скопировано в буфер обмена', 'success');
+  }).catch(() => {
+    showToast('Не удалось скопировать', 'info');
+  });
 }
 function saveField(id){
   const el = getFieldById(id);
@@ -245,11 +250,24 @@ if(clearAllBtn){
     if(resultsBlock) resultsBlock.classList.add('hidden');
     updateInputStats();
     keepStartVisible(inputEl);
+    showToast('Очищено', 'info');
   });
 }
 
 // Тема: сохранение и переключение
 // Тема: только светлая, без переключения
 document.documentElement.setAttribute('data-theme', 'light');
+
+// Toast helper
+let toastTimer;
+function showToast(message, variant){
+  if(!toastEl) return;
+  toastEl.textContent = message;
+  toastEl.classList.remove('success','info');
+  if(variant){ toastEl.classList.add(variant); }
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+}
 
 

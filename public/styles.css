@@ -69,6 +69,18 @@ button{appearance:none;border:none;cursor:pointer;font-weight:600}
 .btn.validate{font-size:13px;color:#fff;background:#1ECD97}
 .btn.btn--sm{min-width:auto;padding:0 10px;height:34px;line-height:34px}
 @keyframes rotating{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+/* Alt color (for Clear All) */
+.btn.btn--alt{border-color:#f97316;color:#f97316;background:#fff}
+.btn.btn--alt:hover{background:#f97316;color:#fff}
+.btn.btn--alt.onclic{border-left-color:#f97316}
+.btn.btn--alt.validate{background:#f97316;color:#fff}
+
+/* Toast */
+.toast{position:fixed;right:16px;bottom:16px;max-width:280px;padding:10px 12px;border-radius:8px;background:rgba(16,24,40,.95);color:#fff;box-shadow:0 8px 30px rgba(0,0,0,.2);opacity:0;pointer-events:none;transform:translateY(8px);transition:opacity .25s ease, transform .25s ease;z-index:99999;font-size:14px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.success{background:#16a34a}
+.toast.info{background:#2563eb}
 /* Fancy "learn-more" button style for check */
 /* Removed special learn-more button styling */
 button:disabled{opacity:.6;cursor:not-allowed}
