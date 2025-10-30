@@ -162,3 +162,18 @@ button:disabled{opacity:.6;cursor:not-allowed}
 /* Removed dark theme; light only */
 
 
+/* ========== Mobile tweaks ========== */
+@media (max-width: 600px){
+  .container{padding:0 12px;margin:20px auto}
+  h1{font-size:20px;margin-bottom:12px}
+  .card{padding:10px}
+  label{font-size:13px}
+  textarea{min-height:180px;font-size:14px}
+  .controls{flex-wrap:wrap;gap:8px}
+  .controls #stats{width:100%;order:3;margin-top:4px}
+  .btn{width:100%;justify-content:center}
+  .btn.btn--sm{height:32px;line-height:32px;padding:0 8px}
+  .field-actions{gap:6px}
+  .topbar-inner{padding:6px 12px}
+  .toast{left:12px;right:12px;bottom:12px}
+}
