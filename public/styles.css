@@ -87,6 +87,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
 #stats{color:var(--muted);font-size:13px}
 .ok{color:var(--ok)}
 .bad{color:var(--bad)}
+.summary{font-size:16px;font-weight:700}
 .hidden{display:none}
 
 /* ========== Shiny border for fields ========== */

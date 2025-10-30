@@ -175,7 +175,7 @@ checkBtn.addEventListener('click', async () => {
     const pb = total ? Math.round((uniqueBlocked.length / total) * 1000) / 10 : 0;
     const dupCount = dupLines.length;
     const dupInfo = dupCount ? `, дубли строк: ${dupCount}` : '';
-    statsEl.innerHTML = `Итог — <span class=\"ok\">валидных: ${uniqueValid.length} (${pv}%)</span>, <span class=\"bad\">заблокировано: ${uniqueBlocked.length} (${pb}%)</span>${dupInfo}`;
+    statsEl.innerHTML = `<span class=\"summary\">Итог — <span class=\"ok\">валидных: ${uniqueValid.length} (${pv}%)</span>, <span class=\"bad\">заблокировано: ${uniqueBlocked.length} (${pb}%)</span>${dupInfo}</span>`;
     const resultsBlock = document.getElementById('results');
     if(resultsBlock) resultsBlock.classList.remove('hidden');
   }catch(err){
