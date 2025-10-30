@@ -1,0 +1,152 @@
+:root{
+  /* Light theme only */
+  --bg:#f5f7fb;
+  --panel:#ffffff;
+  --text:#101828;
+  --muted:#475467;
+  --accent:#2563eb;
+  --ok:#16a34a;
+  --bad:#dc2626;
+  /* shiny border vars */
+  --shiny-cta-bg:#ffffff;
+  --shiny-cta-bg-subtle:#e9ecf3;
+  --shiny-cta-fg:#101828;
+  --shiny-cta-highlight:#2563eb;
+  --shiny-cta-highlight-subtle:#7aa2ff;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background:var(--bg);
+  color:var(--text);
+}
+.topbar{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.8);backdrop-filter: blur(8px);border-bottom:1px solid #e0e7ff}
+.topbar-inner{max-width:100%;padding:8px 16px;display:flex;align-items:center;justify-content:space-between}
+.icon-btn{background:transparent;border:1px solid #2a3153;color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer}
+.secondary{background:#263056;border:1px solid #2a3153}
+.error{background:#2b1620;color:#ffd6e0;border:1px solid #5b2136;padding:10px 12px;border-radius:8px;margin-bottom:12px}
+.preloader{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:9999}
+.preloader.hidden{display:none}
+.hidden{display:none}
+.preloader svg{height:150px;width:150px}
+.container{max-width:100%;margin:32px auto;padding:0 16px}
+h1{margin:0 0 16px 0;font-size:24px;font-weight:700}
+.grid{
+  display:grid;
+  grid-template-columns: 1fr; /* всегда одна колонка */
+  gap:16px;
+}
+.card{
+  background:var(--panel);
+  border:1px solid #e0e7ff;
+  border-radius:10px;
+  padding:12px;
+}
+label{display:block;font-size:14px;color:var(--muted);margin-bottom:8px}
+textarea{
+  width:100%;
+  min-height:260px;
+  resize:vertical;
+  background:#ffffff;
+  color:var(--text);
+  border: none;
+  border-radius:10px;
+  padding:10px;
+  line-height:1.4;
+  white-space: pre; /* не переносить внутри строки, но сохранять переводы строк */
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.controls{display:flex;align-items:center;gap:12px;margin-top:10px}
+.field-actions{display:flex;gap:8px;margin-bottom:8px}
+button{appearance:none;border:none;cursor:pointer;font-weight:600}
+/* Unified green rounded button style */
+.btn{outline:none;height:40px;line-height:40px;text-align:center;min-width:130px;padding:0 16px;border-radius:40px;background:#fff;border:2px solid #1ECD97;color:#1ECD97;letter-spacing:1px;text-shadow:0;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{color:#fff;background:#1ECD97}
+.btn:active{letter-spacing:2px}
+.btn.onclic{min-width:40px;width:40px;border-color:#bbbbbb;border-width:3px;font-size:0;border-left-color:#1ECD97;animation:rotating 2s .25s linear infinite}
+.btn.validate{font-size:13px;color:#fff;background:#1ECD97}
+.btn.btn--sm{min-width:auto;padding:0 10px;height:34px;line-height:34px}
+@keyframes rotating{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+/* Fancy "learn-more" button style for check */
+/* Removed special learn-more button styling */
+button:disabled{opacity:.6;cursor:not-allowed}
+#stats{color:var(--muted);font-size:13px}
+.ok{color:var(--ok)}
+.bad{color:var(--bad)}
+.hidden{display:none}
+
+/* ========== Shiny border for fields ========== */
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@property --gradient-angle-offset {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@property --gradient-percent {
+  syntax: "<percentage>";
+  initial-value: 5%;
+  inherits: false;
+}
+@property --gradient-shine {
+  syntax: "<color>";
+  initial-value: white;
+  inherits: false;
+}
+
+.shiny-field{
+  --animation: gradient-angle linear infinite;
+  --duration: 4s;
+  --shadow-size: 2px;
+  position: relative;
+  isolation: isolate;
+  outline: none;
+  border: 1px solid transparent; /* важен для отображения градиентной рамки */
+  background: linear-gradient(var(--shiny-cta-bg), var(--shiny-cta-bg)) padding-box,
+    conic-gradient(
+      from calc(var(--gradient-angle) - var(--gradient-angle-offset)),
+      transparent,
+      var(--shiny-cta-highlight) var(--gradient-percent),
+      var(--gradient-shine) calc(var(--gradient-percent) * 2),
+      var(--shiny-cta-highlight) calc(var(--gradient-percent) * 3),
+      transparent calc(var(--gradient-percent) * 4)
+    ) border-box;
+  box-shadow: inset 0 0 0 1px var(--shiny-cta-bg-subtle);
+}
+
+.shiny-field, .shiny-field::before, .shiny-field::after{
+  animation: var(--animation) var(--duration),
+             var(--animation) calc(var(--duration) / 0.4) reverse paused;
+  animation-composition: add;
+}
+
+.shiny-field:hover, .shiny-field:focus{
+  --gradient-percent: 20%;
+  --gradient-angle-offset: 95deg;
+  --gradient-shine: var(--shiny-cta-highlight-subtle);
+  animation-play-state: running;
+}
+
+@keyframes gradient-angle { to { --gradient-angle: 360deg; } }
+
+/* Fancy theme toggle (compact subset) */
+.topbar .toggle{background:transparent;border:0;cursor:pointer;position:relative;height:36px;aspect-ratio:1.8/1;border-radius:24px;padding:0;margin:0 0 0 8px}
+.topbar .toggle .socket{position:absolute;inset:0;border-radius:24px;background:light-dark(#e6e8ef,#0a0d18);box-shadow:-0.05em 0.1em 0.2em -0.2em rgba(255,255,255,0.8)}
+.topbar .toggle .socket-shadow{position:absolute;inset:0;border-radius:inherit;opacity:.3;box-shadow:0 0.075em 0.1em 0 rgba(255,255,255,.8)}
+.topbar .toggle .face{position:absolute;inset:3px;border-radius:24px}
+.topbar .toggle .face-plate{background:conic-gradient(from 45deg,#0000,rgba(255,255,255,.08)),light-dark(#d7d9e2,#111827);box-shadow:-0.05em 0.1em 0.2em -0.2em rgba(255,255,255,.8) inset}
+.topbar .toggle .glow{width:25%;position:absolute;top:50%;left:50%;transform:translate(-52%,-48%);filter:drop-shadow(0 0 .2em hsl(182 90% 92%))}
+.topbar .toggle .trail-holder{position:absolute;top:50%;left:50%;transform:translate(-52%,-48%);filter:blur(6px)}
+.topbar .toggle .trail{stroke-width:4}
+.topbar .toggle[aria-pressed="true"] .trail{stroke-dashoffset:-70;opacity:1;transition:stroke-dashoffset .3s}
+.topbar .toggle .trail{opacity:0;transition:opacity .5s}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}
+
+/* Removed dark theme; light only */
+
+
