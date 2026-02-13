@@ -43,66 +43,43 @@ function extractIdsFromLines(text){
   return { entries, ids, idToLines };
 }
 
+// Проверка одного ID через getuid.live: GET /get_uid/:id
+// Ответ {"uid":null} — заблокирован, иначе — валиден
+async function checkOneId(base, id){
+  const url = `${base}/api/get_uid/${encodeURIComponent(id)}`;
+  try{
+    const text = await fetchWithRetry(url, { method: 'GET', headers: { Accept: 'application/json' } }, 3, 8000);
+    const json = JSON.parse(text);
+    return { id, valid: json != null && Object.prototype.hasOwnProperty.call(json, 'uid') && json.uid !== null };
+  }catch(_e){
+    return { id, valid: false };
+  }
+}
+
 async function checkIds(ids){
   if(ids.length === 0){
     return { valid: [], blocked: [] };
   }
 
-  // Warm-up ping to wake Render free instance, with retries
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   try{
     statsEl.textContent = (showToast.messages || I18N[detectLang()]).waking || 'Waking server...';
     await warmUp(`${base}/api/ping`);
-  }catch(_e){ /* ignore, request below will surface error */ }
+  }catch(_e){ /* ignore */ }
 
-  // The remote API accepts an array in "inputData".
-  const payload = { inputData: ids, checkFriends: false, userLang: 'en' };
-
-  const url = `${base}/api/check/account`;
-  const text = await fetchWithRetry(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload)
-  }, 4, 12000); // up to ~36s with backoff
-
-  // Heuristic parsing: we expect per-line statuses or a JSON string.
-  // Try JSON first; if it fails, fall back to searching by status tokens.
-  try{
-    const json = JSON.parse(text);
-    // Expect something like an array of items containing status and id
-    const valid = [];
-    const blocked = [];
-    const items = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
-    for(const item of items){
-      const id = String(item.id ?? item.accountId ?? '').trim();
-      const statusRaw = String(item.status ?? item.state ?? item.result ?? '').toLowerCase();
-      const status = statusRaw.trim();
-      if(id){
-        // приоритет на невалидные
-        if(/\binvalid\b/.test(status) || /\bblock(ed)?\b/.test(status) || status.includes('заблок')) blocked.push(id);
-        else if(/\bvalid\b/.test(status) || status.includes('актив')) valid.push(id);
-      }
-    }
-    if(valid.length + blocked.length > 0){
-      return { valid, blocked };
-    }
-  }catch(_e){ /* not JSON, continue */ }
-
-  // Fallback: match "valid/Активный" and "Blocked/Заблокирован" alongside IDs in the text
-  const lower = text.toLowerCase();
-  const foundIds = Array.from(text.matchAll(idRegex)).map(m => m[1]);
-  const mapped = { valid: [], blocked: [] };
-  for(const id of foundIds){
-    const idx = text.indexOf(id);
-    const windowText = lower.slice(Math.max(0, idx - 80), idx + 80);
-    // сначала ищем явные признаки невалидности
-    if(/\binvalid\b/.test(windowText) || /\bblocked?\b/.test(windowText) || windowText.includes('заблок')) {
-      mapped.blocked.push(id);
-    } else if(/\bvalid\b/.test(windowText) || windowText.includes('актив')) {
-      mapped.valid.push(id);
+  const valid = [];
+  const blocked = [];
+  // Параллельно проверяем пачками, чтобы не перегружать сервер и getuid.live
+  const BATCH = 20;
+  for(let i = 0; i < ids.length; i += BATCH){
+    const slice = ids.slice(i, i + BATCH);
+    const results = await Promise.all(slice.map(id => checkOneId(base, id)));
+    for(const r of results){
+      if(r.valid) valid.push(r.id);
+      else blocked.push(r.id);
     }
   }
-  return mapped;
+  return { valid, blocked };
 }
 
 async function warmUp(pingUrl){

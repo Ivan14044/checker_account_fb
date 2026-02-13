@@ -1,7 +1,7 @@
 FB Account Checker
 ==================
 
-Minimal web app to validate Facebook account IDs via a Node.js proxy to `https://check.fb.tools/api/check/account`.
+Minimal web app to validate Facebook account IDs via a Node.js proxy to `https://getuid.live/get_uid/{id}`.
 
 Run
 ---
@@ -16,13 +16,13 @@ How it works
 ------------
 
 - Extracts IDs by regex: `\b(10|61)[0-9A-Za-z]{10,23}\b` from pasted lines.
-- Sends `{ inputData: [ids], checkFriends: false, userLang: 'en' }` to `/api/check/account` (server proxies the external API).
+- For each ID calls GET `/api/get_uid/:id` (server proxies `https://getuid.live/get_uid/:id`). Response `{"uid":null}` = blocked, otherwise = valid.
 - Splits results into "Валидные" and "Невалидные/Заблокированные".
 
 Notes
 -----
 
-- Large lists are processed in chunks of 100 IDs per request.
+- Large lists are processed in batches (parallel requests, 20 at a time).
 
 Deploy (Render)
 ---------------

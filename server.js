@@ -19,20 +19,19 @@ app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: Date.now() });
 });
 
-// Proxy endpoint to avoid CORS issues from the browser
-app.post('/api/check/account', async (req, res) => {
+// Прокси к getuid.live: один запрос на один ID аккаунта
+// Ответ {"uid":null} — аккаунт заблокирован, иначе — валиден
+app.get('/api/get_uid/:id', async (req, res) => {
   try {
-    const body = req.body;
-    const response = await fetch('https://check.fb.tools/api/check/account', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json; charset=utf-8'
-      },
-      body: JSON.stringify(body)
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'Missing id' });
+    const url = 'https://getuid.live/get_uid/' + encodeURIComponent(id);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' }
     });
-
     const text = await response.text();
-    res.status(response.status).send(text);
+    res.status(response.status).set('Content-Type', 'application/json').send(text);
   } catch (error) {
     res.status(500).json({ error: 'Proxy request failed', details: String(error) });
   }
