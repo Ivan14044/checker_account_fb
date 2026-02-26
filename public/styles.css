@@ -180,6 +180,40 @@ button:disabled{opacity:.6;cursor:not-allowed}
 /* Removed dark theme; light only */
 
 
+/* ========== Прогресс-бар ========== */
+.progress-wrap{
+  margin-top:12px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.progress-track{
+  flex:1;
+  height:8px;
+  background:#e0e7ff;
+  border-radius:8px;
+  overflow:hidden;
+}
+.progress-bar-fill{
+  height:100%;
+  background:linear-gradient(90deg,#1ECD97,#2563eb);
+  border-radius:8px;
+  width:0%;
+  transition:width 0.18s ease;
+}
+.progress-label{
+  font-size:13px;
+  color:var(--muted);
+  white-space:nowrap;
+  min-width:90px;
+  text-align:right;
+}
+
+/* Кнопка «Стоп» */
+.btn.btn--stop{border-color:#dc2626;color:#dc2626;background:#fff}
+.btn.btn--stop:hover{background:#dc2626;color:#fff}
+.btn.btn--stop.onclic{border-left-color:#dc2626}
+
 /* ========== Mobile tweaks ========== */
 @media (max-width: 600px){
   .container{padding:0 12px;margin:20px auto}

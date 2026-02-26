@@ -1,36 +1,46 @@
-const inputEl = document.getElementById('input');
-const validEl = document.getElementById('valid');
-const invalidEl = document.getElementById('invalid');
-const dupesEl = document.getElementById('dupes');
-const checkBtn = document.getElementById('checkBtn');
-const statsEl = document.getElementById('stats');
-const preloader = document.getElementById('preloader');
-const errorEl = document.getElementById('error');
-const toastEl = document.getElementById('toast');
-const langButtons = document.querySelectorAll('.lang-btn');
+const inputEl      = document.getElementById('input');
+const validEl      = document.getElementById('valid');
+const invalidEl    = document.getElementById('invalid');
+const dupesEl      = document.getElementById('dupes');
+const checkBtn     = document.getElementById('checkBtn');
+const stopBtn      = document.getElementById('stopBtn');
+const statsEl      = document.getElementById('stats');
+const preloader    = document.getElementById('preloader');
+const errorEl      = document.getElementById('error');
+const toastEl      = document.getElementById('toast');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar  = document.getElementById('progressBar');
+const progressLbl  = document.getElementById('progressLabel');
+const langButtons  = document.querySelectorAll('.lang-btn');
 
-// ID regex: accounts start with 10 or 61 followed by 10-23 alnum chars
+// ID regex: аккаунты начинаются с 10 или 61, затем 10-23 алфавитно-цифровых символа
 const idRegex = /(\b(?:10|61)[0-9A-Za-z]{10,23}\b)/g;
+
+// ───────── утилиты ─────────
 
 function uniquePreserveOrder(items){
   const seen = new Set();
   const out = [];
   for(const it of items){
-    if(!seen.has(it)){
-      seen.add(it);
-      out.push(it);
-    }
+    if(!seen.has(it)){ seen.add(it); out.push(it); }
   }
   return out;
 }
 
-// Возвращает структуру с соответствием ID → исходные строки
+// Добавить строку в конец textarea без замены всего содержимого
+function appendLine(el, line){
+  if(!el) return;
+  el.value = el.value ? el.value + '\n' + line : line;
+}
+
+// ───────── извлечение ID ─────────
+
 function extractIdsFromLines(text){
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const entries = [];
   const idToLines = new Map();
   for(const line of lines){
-    // Берём только ПЕРВЫЙ ID на строку, даже если совпадений несколько
+    // берём только ПЕРВЫЙ ID на строку
     const firstMatch = line.match(idRegex);
     if(firstMatch && firstMatch.length > 0){
       const id = firstMatch[0];
@@ -43,49 +53,12 @@ function extractIdsFromLines(text){
   return { entries, ids, idToLines };
 }
 
-// Проверка одного ID через getuid.live: GET /get_uid/:id
-// Ответ {"uid":null} — заблокирован, иначе — валиден
-async function checkOneId(base, id){
-  const url = `${base}/api/get_uid/${encodeURIComponent(id)}`;
-  try{
-    const text = await fetchWithRetry(url, { method: 'GET', headers: { Accept: 'application/json' } }, 3, 8000);
-    const json = JSON.parse(text);
-    return { id, valid: json != null && Object.prototype.hasOwnProperty.call(json, 'uid') && json.uid !== null };
-  }catch(_e){
-    return { id, valid: false };
-  }
-}
-
-async function checkIds(ids){
-  if(ids.length === 0){
-    return { valid: [], blocked: [] };
-  }
-
-  const base = (window.PROXY_BASE || '').replace(/\/$/, '');
-  try{
-    statsEl.textContent = (showToast.messages || I18N[detectLang()]).waking || 'Waking server...';
-    await warmUp(`${base}/api/ping`);
-  }catch(_e){ /* ignore */ }
-
-  const valid = [];
-  const blocked = [];
-  // Параллельно проверяем пачками, чтобы не перегружать сервер и getuid.live
-  const BATCH = 20;
-  for(let i = 0; i < ids.length; i += BATCH){
-    const slice = ids.slice(i, i + BATCH);
-    const results = await Promise.all(slice.map(id => checkOneId(base, id)));
-    for(const r of results){
-      if(r.valid) valid.push(r.id);
-      else blocked.push(r.id);
-    }
-  }
-  return { valid, blocked };
-}
+// ───────── warm-up ─────────
 
 async function warmUp(pingUrl){
   const attempts = 5;
   let lastErr;
-  for(let i=0;i<attempts;i++){
+  for(let i = 0; i < attempts; i++){
     try{
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 5000);
@@ -98,9 +71,11 @@ async function warmUp(pingUrl){
   if(lastErr) throw lastErr;
 }
 
-async function fetchWithRetry(url, options, attempts = 3, timeoutMs = 10000){
+// ───────── HTTP с повторами ─────────
+
+async function fetchWithRetry(url, options, attempts = 2, timeoutMs = 6000){
   let lastErr;
-  for(let i=0;i<attempts;i++){
+  for(let i = 0; i < attempts; i++){
     try{
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -110,101 +85,181 @@ async function fetchWithRetry(url, options, attempts = 3, timeoutMs = 10000){
       return await resp.text();
     }catch(err){
       lastErr = err;
-      // backoff
-      await new Promise(res => setTimeout(res, 1000 * Math.pow(2, i)));
+      await new Promise(res => setTimeout(res, 600 * Math.pow(2, i)));
     }
   }
   throw lastErr || new Error('NetworkError');
 }
 
+// ───────── проверка одного ID ─────────
+
+async function checkOneId(base, id){
+  const url = `${base}/api/get_uid/${encodeURIComponent(id)}`;
+  try{
+    const text = await fetchWithRetry(url, { method: 'GET', headers: { Accept: 'application/json' } });
+    const json = JSON.parse(text);
+    return {
+      id,
+      valid: json != null
+          && Object.prototype.hasOwnProperty.call(json, 'uid')
+          && json.uid !== null
+    };
+  }catch(_e){
+    return { id, valid: false };
+  }
+}
+
+// ───────── пул воркеров ─────────
+// Запускает `concurrency` параллельных воркеров, каждый берёт следующий ID из общей очереди.
+// task(item, index) вызывается для каждого элемента.
+
+async function runPool(items, concurrency, task, isCancelled){
+  let idx = 0;
+  async function worker(){
+    while(idx < items.length){
+      if(isCancelled()) return;
+      const i = idx++;
+      await task(items[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, worker)
+  );
+}
+
+// ───────── обновление прогресс-бара ─────────
+
+function updateProgress(done, total){
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  progressBar.style.width = pct + '%';
+  progressLbl.textContent = `${done} / ${total} (${pct}%)`;
+}
+
+// ───────── флаг отмены (внешний для обработчиков) ─────────
+let cancelRequested = false;
+
+// ───────── основная кнопка «Проверить» ─────────
+
 checkBtn.addEventListener('click', async () => {
   const { ids, idToLines } = extractIdsFromLines(inputEl.value);
-  validEl.value = '';
+
+  // сброс предыдущих результатов
+  validEl.value   = '';
   invalidEl.value = '';
   if(dupesEl) dupesEl.value = '';
+  if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+
   statsEl.textContent = `Найдено ID: ${ids.length}`;
   if(ids.length === 0) return;
 
-  checkBtn.disabled = true;
-  checkBtn.classList.add('onclic');
-  if(preloader) preloader.classList.remove('hidden');
-  statsEl.textContent = 'Проверка...';
+  // UI: старт проверки
+  cancelRequested = false;
+  checkBtn.classList.add('hidden');
+  if(stopBtn) stopBtn.classList.remove('hidden');
+  progressWrap.classList.remove('hidden');
+  updateProgress(0, ids.length);
+
+  // показываем блок результатов сразу (поля пустые, но видны)
+  const resultsBlock = document.getElementById('results');
+  if(resultsBlock) resultsBlock.classList.remove('hidden');
+
+  const dict = showToast.messages || I18N[detectLang()];
+  statsEl.textContent = dict.checking || 'Проверка…';
+
+  const base = (window.PROXY_BASE || '').replace(/\/$/, '');
+
+  let doneCount  = 0;
+  let validCount = 0;
+  let badCount   = 0;
+
+  // трекаем уже обработанные ID, чтобы правильно складывать дубли
+  const seenIds = new Set();
+
   try{
-    // If there are a lot, process in chunks to keep payload reasonable
-    const chunkSize = 100;
-    const allValid = [];
-    const allBlocked = [];
-    for(let i=0;i<ids.length;i+=chunkSize){
-      const slice = ids.slice(i, i + chunkSize);
-      const { valid, blocked } = await checkIds(slice);
-      allValid.push(...valid);
-      allBlocked.push(...blocked);
-      statsEl.textContent = `Готово: ${Math.min(i + chunkSize, ids.length)}/${ids.length}`;
-    }
-    const uniqueValid = uniquePreserveOrder(allValid);
-    const uniqueBlocked = uniquePreserveOrder(allBlocked);
-    // Разворачиваем ID в исходные строки
-    const validLines = [];
-    const blockedLines = [];
-    const dupLines = [];
-    for(const id of uniqueValid){
-      const arr = idToLines.get(id) || [];
-      if(arr.length >= 1){
-        // первая строка идёт в «Валидные»
-        validLines.push(arr[0]);
-        // остальные строки идут как дубли
-        if(arr.length > 1){ dupLines.push(...arr.slice(1)); }
-      }
-    }
-    for(const id of uniqueBlocked){
-      const arr = idToLines.get(id) || [];
-      if(arr.length >= 1){
-        blockedLines.push(arr[0]);
-        if(arr.length > 1){ dupLines.push(...arr.slice(1)); }
-      }
-    }
-    validEl.value = validLines.join('\n');
-    invalidEl.value = blockedLines.join('\n');
-    if(dupesEl) dupesEl.value = dupLines.join('\n');
-    const total = uniqueValid.length + uniqueBlocked.length;
-    const pv = total ? Math.round((uniqueValid.length / total) * 1000) / 10 : 0;
-    const pb = total ? Math.round((uniqueBlocked.length / total) * 1000) / 10 : 0;
-    const dupCount = dupLines.length;
-    const dupInfo = dupCount ? `, дубли строк: ${dupCount}` : '';
-    const dict = showToast.messages || I18N[detectLang()];
-    statsEl.innerHTML = `<span class=\"summary\">${dict.summaryPrefix} <span class=\"ok\">${dict.validWord}: ${uniqueValid.length} (${pv}%)</span>, <span class=\"bad\">${dict.blockedWord}: ${uniqueBlocked.length} (${pb}%)</span>${dupInfo}</span>`;
-    const resultsBlock = document.getElementById('results');
-    if(resultsBlock) resultsBlock.classList.remove('hidden');
+    await runPool(
+      ids,
+      25, // количество параллельных воркеров
+      async (id) => {
+        const { valid } = await checkOneId(base, id);
+
+        // определяем строки для этого ID
+        const arr = idToLines.get(id) || [];
+        if(arr.length > 0 && !seenIds.has(id)){
+          seenIds.add(id);
+          // первая строка — в нужный список
+          if(valid){ appendLine(validEl, arr[0]); validCount++; }
+          else      { appendLine(invalidEl, arr[0]); badCount++; }
+          // остальные строки того же ID — в дубли
+          arr.slice(1).forEach(l => appendLine(dupesEl, l));
+        }
+
+        doneCount++;
+        updateProgress(doneCount, ids.length);
+        statsEl.textContent = `${dict.checking || 'Проверка…'} ${doneCount}/${ids.length}`;
+      },
+      () => cancelRequested
+    );
   }catch(err){
-    const dict = showToast.messages || I18N[detectLang()];
     statsEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
     if(errorEl){
       errorEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
       errorEl.classList.remove('hidden');
     }
   }finally{
-    checkBtn.disabled = false;
-    checkBtn.classList.remove('onclic');
-    checkBtn.classList.add('validate');
-    setTimeout(() => checkBtn.classList.remove('validate'), 1200);
-    if(preloader) preloader.classList.add('hidden');
+    // UI: конец проверки
+    checkBtn.classList.remove('hidden');
+    if(stopBtn) stopBtn.classList.add('hidden');
+
+    const total = validCount + badCount;
+    const pv = total ? Math.round((validCount / total) * 1000) / 10 : 0;
+    const pb = total ? Math.round((badCount   / total) * 1000) / 10 : 0;
+    const dupCount = dupesEl ? dupesEl.value.split('\n').filter(Boolean).length : 0;
+    const dupInfo  = dupCount ? `, дубли строк: ${dupCount}` : '';
+
+    if(cancelRequested){
+      statsEl.innerHTML = `<span class="summary bad">${dict.stopped || 'Остановлено'}: ${dict.validWord}: ${validCount}, ${dict.blockedWord}: ${badCount}</span>`;
+    }else{
+      statsEl.innerHTML = `<span class="summary">${dict.summaryPrefix} <span class="ok">${dict.validWord}: ${validCount} (${pv}%)</span>, <span class="bad">${dict.blockedWord}: ${badCount} (${pb}%)</span>${dupInfo}</span>`;
+    }
   }
 });
 
-// Показывать количество строк и число найденных ID при вводе/вставке
+// ───────── кнопка «Стоп» ─────────
+
+if(stopBtn){
+  stopBtn.addEventListener('click', () => {
+    cancelRequested = true;
+    stopBtn.disabled = true;
+    const dict = showToast.messages || I18N[detectLang()];
+    statsEl.textContent = dict.stopping || 'Останавливаем…';
+  });
+}
+
+// ───────── счётчик строк при вводе ─────────
+
 function updateInputStats(){
   const linesCount = inputEl.value.split(/\r?\n/).filter(l => l.trim().length > 0).length;
   const { ids } = extractIdsFromLines(inputEl.value);
-  const idsCount = ids.length;
-  statsEl.textContent = `Строк: ${linesCount}, найдено ID: ${idsCount}`;
+  statsEl.textContent = `Строк: ${linesCount}, найдено ID: ${ids.length}`;
 }
 
 inputEl.addEventListener('input', updateInputStats);
-window.addEventListener('DOMContentLoaded', updateInputStats);
-// Скрыть прелоадер после полной загрузки интерфейса
-window.addEventListener('load', () => { if(preloader) preloader.classList.add('hidden'); });
 
-// Guidance for GitHub Pages if backend is not configured
+// ───────── старт: фоновый warm-up + инициализация UI ─────────
+
+window.addEventListener('DOMContentLoaded', () => {
+  updateInputStats();
+  // фоновый пинг сервера при загрузке страницы, чтобы к моменту нажатия кнопки сервер уже был тёплым
+  const base = (window.PROXY_BASE || '').replace(/\/$/, '');
+  warmUp(`${base}/api/ping`).catch(() => {});
+});
+
+window.addEventListener('load', () => {
+  if(preloader) preloader.classList.add('hidden');
+});
+
+// ───────── GitHub Pages: предупреждение если нет PROXY_BASE ─────────
+
 try{
   const isGhPages = /github\.io$/.test(location.hostname);
   if(isGhPages && (!window.PROXY_BASE || window.PROXY_BASE === '')){
@@ -215,28 +270,25 @@ try{
   }
 }catch(_){ }
 
-// Не смещать прокрутку вправо при вставке/вводе — всегда показывать начало строк
-function keepStartVisible(el){
-  el.scrollLeft = 0;
-}
-inputEl.addEventListener('input', () => keepStartVisible(inputEl));
-inputEl.addEventListener('paste', () => setTimeout(() => keepStartVisible(inputEl), 0));
-inputEl.addEventListener('keyup', () => keepStartVisible(inputEl));
+// ───────── фикс прокрутки textarea ─────────
 
-// Копирование/Сохранение
-function getFieldById(id){ return document.getElementById(id); }
+function keepStartVisible(el){ el.scrollLeft = 0; }
+inputEl.addEventListener('input',  () => keepStartVisible(inputEl));
+inputEl.addEventListener('paste',  () => setTimeout(() => keepStartVisible(inputEl), 0));
+inputEl.addEventListener('keyup',  () => keepStartVisible(inputEl));
+
+// ───────── копирование / сохранение ─────────
+
 function copyField(id){
-  const el = getFieldById(id);
+  const el = document.getElementById(id);
   if(!el) return;
   navigator.clipboard.writeText(el.value || '').then(() => {
     const dict = showToast.messages || I18N[detectLang()];
     showToast(dict.copied, 'success');
-  }).catch(() => {
-    showToast('Clipboard error', 'info');
-  });
+  }).catch(() => showToast('Clipboard error', 'info'));
 }
 function saveField(id){
-  const el = getFieldById(id);
+  const el = document.getElementById(id);
   if(!el) return;
   const blob = new Blob([el.value || ''], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
@@ -256,16 +308,19 @@ document.addEventListener('click', (e) => {
   if(action === 'save') saveField(target);
 });
 
-// Очистить всё
+// ───────── очистить всё ─────────
+
 const clearAllBtn = document.getElementById('clearAll');
 if(clearAllBtn){
   clearAllBtn.addEventListener('click', () => {
-    inputEl.value = '';
-    validEl.value = '';
+    inputEl.value   = '';
+    validEl.value   = '';
     invalidEl.value = '';
     if(dupesEl) dupesEl.value = '';
     statsEl.textContent = '';
-    if(errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+    if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+    progressWrap.classList.add('hidden');
+    updateProgress(0, 0);
     const resultsBlock = document.getElementById('results');
     if(resultsBlock) resultsBlock.classList.add('hidden');
     updateInputStats();
@@ -275,76 +330,89 @@ if(clearAllBtn){
   });
 }
 
-// Тема: сохранение и переключение
-// Тема: только светлая, без переключения
+// ───────── тема ─────────
 document.documentElement.setAttribute('data-theme', 'light');
 
-// Toast helper
+// ───────── toast ─────────
+
 let toastTimer;
 function showToast(message, variant){
   if(!toastEl) return;
   toastEl.textContent = message;
-  toastEl.classList.remove('success','info');
-  if(variant){ toastEl.classList.add(variant); }
+  toastEl.classList.remove('success', 'info');
+  if(variant) toastEl.classList.add(variant);
   toastEl.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
 }
 
-// i18n
+// ───────── i18n ─────────
+
 const I18N = {
   ru: {
-    heroTitle: 'Чекер аккаунтов Facebook',
-    heroP1: 'Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.',
-    heroP2: 'Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.',
-    inputLabel: 'Вставьте строки (по одной на строке):',
-    checkBtn: 'Проверить аккаунты',
-    clearBtn: 'Очистить всё',
-    validLabel: 'Валидные',
+    heroTitle:    'Чекер аккаунтов Facebook',
+    heroP1:       'Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.',
+    heroP2:       'Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.',
+    inputLabel:   'Вставьте строки (по одной на строке):',
+    checkBtn:     'Проверить аккаунты',
+    stopBtn:      'Остановить',
+    clearBtn:     'Очистить всё',
+    validLabel:   'Валидные',
     invalidLabel: 'Невалидные/Заблокированные',
-    dupesLabel: 'Дубли (ID повторяются)',
-    copied: 'Скопировано в буфер обмена',
-    cleared: 'Очищено',
-    summaryPrefix: 'Итог —',
-    validWord: 'валидных',
-    blockedWord: 'заблокировано',
-    waking: 'Пробуждение сервера…',
+    dupesLabel:   'Дубли (ID повторяются)',
+    copied:       'Скопировано в буфер обмена',
+    cleared:      'Очищено',
+    summaryPrefix:'Итог —',
+    validWord:    'валидных',
+    blockedWord:  'заблокировано',
+    checking:     'Проверка…',
+    stopping:     'Останавливаем…',
+    stopped:      'Остановлено',
+    waking:       'Пробуждение сервера…',
     networkError: 'Сетевой сбой. Попробуйте ещё раз'
   },
   uk: {
-    heroTitle: 'Чекер акаунтів Facebook',
-    heroP1: 'Інструмент для швидкої перевірки стану ваших акаунтів Facebook.',
-    heroP2: 'Вставте список акаунтів у поле та натисніть «Перевірити акаунти». Система визначить, які акаунти активні, заблоковані або потребують підтвердження.',
-    inputLabel: 'Вставте рядки (по одному на рядок):',
-    checkBtn: 'Перевірити акаунти',
-    clearBtn: 'Очистити все',
-    validLabel: 'Валідні',
+    heroTitle:    'Чекер акаунтів Facebook',
+    heroP1:       'Інструмент для швидкої перевірки стану ваших акаунтів Facebook.',
+    heroP2:       'Вставте список акаунтів у поле та натисніть «Перевірити акаунти». Система визначить, які акаунти активні, заблоковані або потребують підтвердження.',
+    inputLabel:   'Вставте рядки (по одному на рядок):',
+    checkBtn:     'Перевірити акаунти',
+    stopBtn:      'Зупинити',
+    clearBtn:     'Очистити все',
+    validLabel:   'Валідні',
     invalidLabel: 'Невалідні/Заблоковані',
-    dupesLabel: 'Дублі (ID повторюються)',
-    copied: 'Скопійовано у буфер',
-    cleared: 'Очищено',
-    summaryPrefix: 'Підсумок —',
-    validWord: 'валідних',
-    blockedWord: 'заблоковано',
-    waking: 'Пробудження сервера…',
+    dupesLabel:   'Дублі (ID повторюються)',
+    copied:       'Скопійовано у буфер',
+    cleared:      'Очищено',
+    summaryPrefix:'Підсумок —',
+    validWord:    'валідних',
+    blockedWord:  'заблоковано',
+    checking:     'Перевірка…',
+    stopping:     'Зупиняємо…',
+    stopped:      'Зупинено',
+    waking:       'Пробудження сервера…',
     networkError: 'Помилка мережі. Спробуйте ще раз'
   },
   en: {
-    heroTitle: 'Facebook Accounts Checker',
-    heroP1: 'A tool to quickly check the status of your Facebook accounts.',
-    heroP2: 'Paste the list of accounts and click “Check accounts”. The system will detect which are active, blocked or require verification.',
-    inputLabel: 'Paste lines (one per line):',
-    checkBtn: 'Check accounts',
-    clearBtn: 'Clear all',
-    validLabel: 'Valid',
+    heroTitle:    'Facebook Accounts Checker',
+    heroP1:       'A tool to quickly check the status of your Facebook accounts.',
+    heroP2:       'Paste the list of accounts and click "Check accounts". The system will detect which are active, blocked or require verification.',
+    inputLabel:   'Paste lines (one per line):',
+    checkBtn:     'Check accounts',
+    stopBtn:      'Stop',
+    clearBtn:     'Clear all',
+    validLabel:   'Valid',
     invalidLabel: 'Invalid/Blocked',
-    dupesLabel: 'Duplicates (IDs repeated)',
-    copied: 'Copied to clipboard',
-    cleared: 'Cleared',
-    summaryPrefix: 'Summary —',
-    validWord: 'valid',
-    blockedWord: 'blocked',
-    waking: 'Warming up server…',
+    dupesLabel:   'Duplicates (IDs repeated)',
+    copied:       'Copied to clipboard',
+    cleared:      'Cleared',
+    summaryPrefix:'Summary —',
+    validWord:    'valid',
+    blockedWord:  'blocked',
+    checking:     'Checking…',
+    stopping:     'Stopping…',
+    stopped:      'Stopped',
+    waking:       'Warming up server…',
     networkError: 'Network error. Please retry'
   }
 };
@@ -366,9 +434,7 @@ function applyLang(lang){
     const key = el.getAttribute('data-i18n');
     if(dict[key]) el.textContent = dict[key];
   });
-  // update toasts messages references
   showToast.messages = dict;
-  // update active button
   langButtons.forEach(b => b.classList.toggle('active', b.getAttribute('data-lang') === lang));
   try{ localStorage.setItem('lang', lang); }catch(_){ }
 }
@@ -377,5 +443,3 @@ langButtons.forEach(btn => btn.addEventListener('click', () => applyLang(btn.get
 
 const initialLang = detectLang();
 applyLang(initialLang);
-
-
