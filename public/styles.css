@@ -184,6 +184,11 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .progress-wrap{
   margin-top:12px;
   display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.progress-row{
+  display:flex;
   align-items:center;
   gap:10px;
 }
@@ -208,6 +213,37 @@ button:disabled{opacity:.6;cursor:not-allowed}
   min-width:90px;
   text-align:right;
 }
+
+/* Соотношение валид/невалид в реальном времени */
+.ratio-wrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:12px;
+  color:var(--muted);
+}
+.ratio-bar{
+  flex:1;
+  height:6px;
+  background:#e0e7ff;
+  border-radius:6px;
+  overflow:hidden;
+  display:flex;
+}
+.ratio-segment{
+  height:100%;
+  border-radius:0;
+  transition:width 0.15s ease;
+}
+.ratio-valid{background:var(--ok);}
+.ratio-invalid{background:var(--bad);}
+.ratio-label{
+  white-space:nowrap;
+  min-width:90px;
+  text-align:right;
+}
+.ratio-label .v{color:var(--ok)}
+.ratio-label .x{color:var(--bad)}
 
 /* Кнопка «Стоп» */
 .btn.btn--stop{border-color:#dc2626;color:#dc2626;background:#fff}

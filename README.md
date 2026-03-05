@@ -24,24 +24,30 @@ Notes
 
 - Large lists are processed in batches (parallel requests, 20 at a time).
 
-Deploy (Render)
----------------
+Deploy (Render) — Вариант 1: всё на одном домене
+------------------------------------------------
 
-Option A — One-click via dashboard:
+Сайт и API работают с одного URL (например `https://checker-account-fb.onrender.com`). Репозиторий уже в GitHub.
 
-1) Push this project to your GitHub (see commands below).
-2) Go to Render (`https://dashboard.render.com`) → New → Web Service.
-3) Connect the repo.
-4) Settings:
-   - Environment: Node
-   - Build Command: `npm install`
-   - Start Command: `npm run start`
-   - Node Version: 18
-5) Create Web Service → wait for deploy → open the URL.
+**Шаг 1.** Откройте https://dashboard.render.com и войдите (через GitHub удобнее).
 
-Option B — render.yaml:
+**Шаг 2.** Создайте сервис:
+- Нажмите **New** → **Web Service**.
+- В списке репозиториев выберите **checker_account_fb** (или подключите GitHub, если репо ещё не виден).
+- Нажмите **Connect**.
 
-Render reads `render.yaml` and sets everything for you. On Render, choose "Blueprint" and point to this repo.
+**Шаг 3.** Настройки (часто подставляются из `render.yaml`):
+- **Name:** `checker-account-fb` (или любое).
+- **Environment:** Node.
+- **Build Command:** `npm install`
+- **Start Command:** `npm run start`
+- **Node Version:** 18 (в разделе Environment Variables добавьте `NODE_VERSION` = `18`, если есть поле).
+
+**Шаг 4.** Нажмите **Create Web Service**. Дождитесь окончания сборки и деплоя (1–3 минуты).
+
+**Шаг 5.** Откройте выданный URL вида `https://checker-account-fb.onrender.com` — это и есть ваш единый адрес: там и интерфейс, и проверка аккаунтов.
+
+**Свой домен (по желанию):** В карточке сервиса → **Settings** → **Custom Domains** → Add → введите свой домен и настройте CNAME/A-записи по подсказкам Render.
 
 Push to GitHub
 --------------

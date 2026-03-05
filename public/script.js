@@ -11,6 +11,9 @@ const toastEl      = document.getElementById('toast');
 const progressWrap = document.getElementById('progressWrap');
 const progressBar  = document.getElementById('progressBar');
 const progressLbl  = document.getElementById('progressLabel');
+const ratioValid   = document.getElementById('ratioValid');
+const ratioInvalid = document.getElementById('ratioInvalid');
+const ratioLabel   = document.getElementById('ratioLabel');
 const langButtons  = document.querySelectorAll('.lang-btn');
 
 // ID regex: аккаунты начинаются с 10 или 61, затем 10-23 алфавитно-цифровых символа
@@ -135,6 +138,17 @@ function updateProgress(done, total){
   progressLbl.textContent = `${done} / ${total} (${pct}%)`;
 }
 
+// Обновление соотношения валид/невалид в реальном времени
+function updateRatio(validCount, badCount, doneCount){
+  if(!ratioValid || !ratioInvalid || !ratioLabel) return;
+  const total = validCount + badCount;
+  const pValid = total ? Math.round((validCount / total) * 100) : 0;
+  const pBad   = total ? Math.round((badCount / total) * 100) : 0;
+  ratioValid.style.width   = pValid + '%';
+  ratioInvalid.style.width = pBad + '%';
+  ratioLabel.innerHTML = `<span class="v">✓ ${validCount} (${pValid}%)</span> · <span class="x">✗ ${badCount} (${pBad}%)</span>`;
+}
+
 // ───────── флаг отмены (внешний для обработчиков) ─────────
 let cancelRequested = false;
 
@@ -158,6 +172,7 @@ checkBtn.addEventListener('click', async () => {
   if(stopBtn) stopBtn.classList.remove('hidden');
   progressWrap.classList.remove('hidden');
   updateProgress(0, ids.length);
+  updateRatio(0, 0, 0);
 
   // показываем блок результатов сразу (поля пустые, но видны)
   const resultsBlock = document.getElementById('results');
@@ -195,6 +210,7 @@ checkBtn.addEventListener('click', async () => {
 
         doneCount++;
         updateProgress(doneCount, ids.length);
+        updateRatio(validCount, badCount, doneCount);
         statsEl.textContent = `${dict.checking || 'Проверка…'} ${doneCount}/${ids.length}`;
       },
       () => cancelRequested
@@ -321,6 +337,7 @@ if(clearAllBtn){
     if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
     progressWrap.classList.add('hidden');
     updateProgress(0, 0);
+    updateRatio(0, 0, 0);
     const resultsBlock = document.getElementById('results');
     if(resultsBlock) resultsBlock.classList.add('hidden');
     updateInputStats();
