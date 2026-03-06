@@ -14,6 +14,9 @@ const progressLbl  = document.getElementById('progressLabel');
 const ratioValid   = document.getElementById('ratioValid');
 const ratioInvalid = document.getElementById('ratioInvalid');
 const ratioLabel   = document.getElementById('ratioLabel');
+const uploadZone   = document.getElementById('uploadZone');
+const fileInput    = document.getElementById('fileInput');
+const etaEl        = document.getElementById('etaEl');
 const langButtons  = document.querySelectorAll('.lang-btn');
 
 // ID regex: аккаунты начинаются с 10 или 61, затем 10-23 алфавитно-цифровых символа
@@ -138,6 +141,17 @@ function updateProgress(done, total){
   progressLbl.textContent = `${done} / ${total} (${pct}%)`;
 }
 
+// Форматирование оставшегося времени (ETA)
+function formatEta(seconds){
+  const d = I18N[detectLang()] || I18N.en;
+  if(seconds < 1) return d.etaLessThanOneSec || '< 1 сек';
+  if(seconds < 60) return `~ ${Math.round(seconds)} ${d.etaSec || 'сек'}`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  const min = d.etaMin || 'мин';
+  return s > 0 ? `~ ${m} ${min} ${s} ${d.etaSec || 'сек'}` : `~ ${m} ${min}`;
+}
+
 // Обновление соотношения валид/невалид в реальном времени
 function updateRatio(validCount, badCount, doneCount){
   if(!ratioValid || !ratioInvalid || !ratioLabel) return;
@@ -182,6 +196,7 @@ checkBtn.addEventListener('click', async () => {
   statsEl.textContent = dict.checking || 'Проверка…';
 
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
+  const startTime = Date.now();
 
   let doneCount  = 0;
   let validCount = 0;
@@ -211,6 +226,16 @@ checkBtn.addEventListener('click', async () => {
         doneCount++;
         updateProgress(doneCount, ids.length);
         updateRatio(validCount, badCount, doneCount);
+        if(etaEl){
+          if(doneCount >= 5){
+            const elapsedSec = (Date.now() - startTime) / 1000;
+            const rate = doneCount / elapsedSec;
+            const remaining = ids.length - doneCount;
+            const etaSec = remaining / rate;
+            etaEl.textContent = formatEta(etaSec);
+            etaEl.classList.remove('hidden');
+          }
+        }
         statsEl.textContent = `${dict.checking || 'Проверка…'} ${doneCount}/${ids.length}`;
       },
       () => cancelRequested
@@ -225,6 +250,7 @@ checkBtn.addEventListener('click', async () => {
     // UI: конец проверки
     checkBtn.classList.remove('hidden');
     if(stopBtn) stopBtn.classList.add('hidden');
+    if(etaEl) etaEl.classList.add('hidden');
 
     const total = validCount + badCount;
     const pv = total ? Math.round((validCount / total) * 1000) / 10 : 0;
@@ -260,6 +286,40 @@ function updateInputStats(){
 }
 
 inputEl.addEventListener('input', updateInputStats);
+
+// ───────── загрузка файла (drag-and-drop + выбор) ─────────
+
+function loadFileIntoInput(file){
+  if(!file) return;
+  const ok = file.type?.startsWith('text/') || /\.(txt|csv)$/i.test(file.name || '');
+  if(!ok && file.type) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    inputEl.value = reader.result;
+    updateInputStats();
+    keepStartVisible(inputEl);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+if(uploadZone && fileInput){
+  uploadZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if(f) loadFileIntoInput(f);
+    fileInput.value = '';
+  });
+  ['dragenter','dragover'].forEach(ev => {
+    uploadZone.addEventListener(ev, e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  });
+  ['dragleave','drop'].forEach(ev => {
+    uploadZone.addEventListener(ev, e => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      if(ev === 'drop' && e.dataTransfer?.files?.[0]) loadFileIntoInput(e.dataTransfer.files[0]);
+    });
+  });
+}
 
 // ───────── старт: фоновый warm-up + инициализация UI ─────────
 
@@ -371,6 +431,7 @@ const I18N = {
     heroP1:       'Этот инструмент позволяет быстро проверить состояние ваших Facebook‑аккаунтов.',
     heroP2:       'Вставьте список аккаунтов в поле ввода и нажмите кнопку «Проверить аккаунты». Система определит, какие аккаунты активны, заблокированы или требуют подтверждения.',
     inputLabel:   'Вставьте строки (по одной на строке):',
+    uploadHint:   'Перетащите файл сюда или нажмите для выбора',
     checkBtn:     'Проверить аккаунты',
     stopBtn:      'Остановить',
     clearBtn:     'Очистить всё',
@@ -386,13 +447,17 @@ const I18N = {
     stopping:     'Останавливаем…',
     stopped:      'Остановлено',
     waking:       'Пробуждение сервера…',
-    networkError: 'Сетевой сбой. Попробуйте ещё раз'
+    networkError: 'Сетевой сбой. Попробуйте ещё раз',
+    etaLessThanOneSec: '< 1 сек',
+    etaSec: 'сек',
+    etaMin: 'мин'
   },
   uk: {
     heroTitle:    'Чекер акаунтів Facebook',
     heroP1:       'Інструмент для швидкої перевірки стану ваших акаунтів Facebook.',
     heroP2:       'Вставте список акаунтів у поле та натисніть «Перевірити акаунти». Система визначить, які акаунти активні, заблоковані або потребують підтвердження.',
     inputLabel:   'Вставте рядки (по одному на рядок):',
+    uploadHint:   'Перетягніть файл сюди або натисніть для вибору',
     checkBtn:     'Перевірити акаунти',
     stopBtn:      'Зупинити',
     clearBtn:     'Очистити все',
@@ -408,13 +473,17 @@ const I18N = {
     stopping:     'Зупиняємо…',
     stopped:      'Зупинено',
     waking:       'Пробудження сервера…',
-    networkError: 'Помилка мережі. Спробуйте ще раз'
+    networkError: 'Помилка мережі. Спробуйте ще раз',
+    etaLessThanOneSec: '< 1 сек',
+    etaSec: 'сек',
+    etaMin: 'хв'
   },
   en: {
     heroTitle:    'Facebook Accounts Checker',
     heroP1:       'A tool to quickly check the status of your Facebook accounts.',
     heroP2:       'Paste the list of accounts and click "Check accounts". The system will detect which are active, blocked or require verification.',
     inputLabel:   'Paste lines (one per line):',
+    uploadHint:   'Drag file here or click to select',
     checkBtn:     'Check accounts',
     stopBtn:      'Stop',
     clearBtn:     'Clear all',
@@ -430,7 +499,10 @@ const I18N = {
     stopping:     'Stopping…',
     stopped:      'Stopped',
     waking:       'Warming up server…',
-    networkError: 'Network error. Please retry'
+    networkError: 'Network error. Please retry',
+    etaLessThanOneSec: '< 1 sec',
+    etaSec: 'sec',
+    etaMin: 'min'
   }
 };
 

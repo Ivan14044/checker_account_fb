@@ -250,6 +250,41 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .btn.btn--stop:hover{background:#dc2626;color:#fff}
 .btn.btn--stop.onclic{border-left-color:#dc2626}
 
+/* ========== Зона загрузки файла ========== */
+.upload-zone{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:56px;
+  padding:12px 16px;
+  margin-bottom:8px;
+  border:2px dashed #d7dcef;
+  border-radius:10px;
+  background:#f8fafc;
+  color:var(--muted);
+  font-size:14px;
+  cursor:pointer;
+  transition:border-color .2s, background .2s;
+}
+.upload-zone:hover{
+  border-color:#2563eb;
+  background:#eff6ff;
+}
+.upload-zone.dragover{
+  border-color:#2563eb;
+  background:#eff6ff;
+}
+.upload-text{pointer-events:none}
+
+/* Оценка времени до конца */
+.eta-label{
+  font-size:13px;
+  color:var(--muted);
+  white-space:nowrap;
+  min-width:70px;
+  text-align:right;
+}
+
 /* ========== Mobile tweaks ========== */
 @media (max-width: 600px){
   .container{padding:0 12px;margin:20px auto}
