@@ -217,8 +217,8 @@ checkBtn.addEventListener('click', async () => {
         if(arr.length > 0 && !seenIds.has(id)){
           seenIds.add(id);
           // первая строка — в нужный список
-          if(valid){ appendLine(validEl, arr[0]); validCount++; }
-          else      { appendLine(invalidEl, arr[0]); badCount++; }
+          if(valid){ appendLine(validEl, id); validCount++; }
+          else      { appendLine(invalidEl, id); badCount++; }
           // остальные строки того же ID — в дубли
           arr.slice(1).forEach(l => appendLine(dupesEl, l));
         }
