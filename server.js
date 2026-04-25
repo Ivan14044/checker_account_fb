@@ -350,7 +350,10 @@ app.post('/api/check/stream', async (req, res) => {
     ctrl.abort();
     clearInterval(heartbeat);
   };
-  req.on('close', onClose);
+  // ВАЖНО: слушаем close на response, не на request.
+  // req.on('close') в современном Node стреляет сразу после полного чтения тела,
+  // а не при разрыве соединения — это рушит SSE сразу после события 'start'.
+  res.on('close', onClose);
 
   send('start', { total: unique.length, batches: batches.length });
   if (unique.length === 0) {
