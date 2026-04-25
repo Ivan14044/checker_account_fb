@@ -18,8 +18,13 @@ const uploadZone   = document.getElementById('uploadZone');
 const fileInput    = document.getElementById('fileInput');
 const etaEl        = document.getElementById('etaEl');
 const langButtons  = document.querySelectorAll('.lang-btn');
+const cntValidEl   = document.getElementById('cntValid');
+const cntInvalidEl = document.getElementById('cntInvalid');
+const cntDoneEl    = document.getElementById('cntDone');
+const cntTotalEl   = document.getElementById('cntTotal');
+const resultsBlock = document.getElementById('results');
 
-// ID regex: аккаунты начинаются с 10 или 61, затем 10-23 алфавитно-цифровых символа
+// ID regex: аккаунты начинаются с 10 или 61, затем 10–23 алфавитно-цифровых символа
 const idRegex = /(\b(?:10|61)[0-9A-Za-z]{10,23}\b)/g;
 
 // ───────── утилиты ─────────
@@ -33,10 +38,32 @@ function uniquePreserveOrder(items){
   return out;
 }
 
-// Добавить строку в конец textarea без замены всего содержимого
 function appendLine(el, line){
   if(!el) return;
   el.value = el.value ? el.value + '\n' + line : line;
+}
+
+// плавный count-up для чисел в счётчиках
+const countAnimMap = new WeakMap();
+function animateCount(el, target){
+  if(!el) return;
+  const prev = countAnimMap.get(el);
+  if(prev) cancelAnimationFrame(prev.raf);
+  const start = parseInt(el.textContent || '0', 10) || 0;
+  if(start === target){ el.textContent = String(target); return; }
+  const dur = Math.min(450, 120 + Math.abs(target - start) * 6);
+  const t0 = performance.now();
+  const state = { raf: 0 };
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / dur);
+    const eased = 1 - Math.pow(1 - k, 3);
+    const v = Math.round(start + (target - start) * eased);
+    el.textContent = String(v);
+    if(k < 1){ state.raf = requestAnimationFrame(step); }
+    else { countAnimMap.delete(el); }
+  };
+  state.raf = requestAnimationFrame(step);
+  countAnimMap.set(el, state);
 }
 
 // ───────── извлечение ID ─────────
@@ -46,7 +73,6 @@ function extractIdsFromLines(text){
   const entries = [];
   const idToLines = new Map();
   for(const line of lines){
-    // берём только ПЕРВЫЙ ID на строку
     const firstMatch = line.match(idRegex);
     if(firstMatch && firstMatch.length > 0){
       const id = firstMatch[0];
@@ -77,71 +103,64 @@ async function warmUp(pingUrl){
   if(lastErr) throw lastErr;
 }
 
-// ───────── HTTP с повторами ─────────
+// ───────── stream-проверка через SSE ─────────
+// Один POST, сервер стримит результаты по 50 ID за раз.
+// onBatch({results:[{id,valid}], done, total}); onEnd({total,valid,invalid})
+async function streamCheck({ base, ids, signal, onStart, onBatch, onEnd, onError }){
+  const url = `${base}/api/check/stream`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ ids }),
+    signal,
+  });
+  if(!resp.ok || !resp.body){
+    throw new Error('HTTP ' + resp.status);
+  }
 
-async function fetchWithRetry(url, options, attempts = 2, timeoutMs = 6000){
-  let lastErr;
-  for(let i = 0; i < attempts; i++){
-    try{
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      const resp = await fetch(url, { ...options, signal: ctrl.signal });
-      clearTimeout(t);
-      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.text();
-    }catch(err){
-      lastErr = err;
-      await new Promise(res => setTimeout(res, 600 * Math.pow(2, i)));
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  const handleEvent = (eventName, dataStr) => {
+    let data;
+    try { data = JSON.parse(dataStr); } catch(_) { return; }
+    if(eventName === 'start' && onStart) onStart(data);
+    else if(eventName === 'batch' && onBatch) onBatch(data);
+    else if(eventName === 'end' && onEnd) onEnd(data);
+    else if(eventName === 'error' && onError) onError(data);
+  };
+
+  while(true){
+    const { value, done } = await reader.read();
+    if(done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while((idx = buffer.indexOf('\n\n')) !== -1){
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if(!raw || raw.startsWith(':')) continue; // heartbeat / comment
+      let eventName = 'message';
+      let dataStr = '';
+      for(const line of raw.split('\n')){
+        if(line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if(line.startsWith('data:')) dataStr += (dataStr ? '\n' : '') + line.slice(5).trim();
+      }
+      if(dataStr) handleEvent(eventName, dataStr);
     }
   }
-  throw lastErr || new Error('NetworkError');
-}
-
-// ───────── проверка одного ID ─────────
-
-async function checkOneId(base, id){
-  const url = `${base}/api/get_uid/${encodeURIComponent(id)}`;
-  try{
-    const text = await fetchWithRetry(url, { method: 'GET', headers: { Accept: 'application/json' } });
-    const json = JSON.parse(text);
-    return {
-      id,
-      valid: json != null
-          && Object.prototype.hasOwnProperty.call(json, 'uid')
-          && json.uid !== null
-    };
-  }catch(_e){
-    return { id, valid: false };
-  }
-}
-
-// ───────── пул воркеров ─────────
-// Запускает `concurrency` параллельных воркеров, каждый берёт следующий ID из общей очереди.
-// task(item, index) вызывается для каждого элемента.
-
-async function runPool(items, concurrency, task, isCancelled){
-  let idx = 0;
-  async function worker(){
-    while(idx < items.length){
-      if(isCancelled()) return;
-      const i = idx++;
-      await task(items[i], i);
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, worker)
-  );
 }
 
 // ───────── обновление прогресс-бара ─────────
 
 function updateProgress(done, total){
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  progressBar.style.width = pct + '%';
-  progressLbl.textContent = `${done} / ${total} (${pct}%)`;
+  const pct = total ? (done / total) * 100 : 0;
+  progressBar.style.width = pct.toFixed(2) + '%';
+  progressLbl.textContent = `${done} / ${total} (${Math.round(pct)}%)`;
+  if(cntDoneEl)  animateCount(cntDoneEl, done);
+  if(cntTotalEl) cntTotalEl.textContent = String(total);
 }
 
-// Форматирование оставшегося времени (ETA)
 function formatEta(seconds){
   const d = I18N[detectLang()] || I18N.en;
   if(seconds < 1) return d.etaLessThanOneSec || '< 1 сек';
@@ -152,8 +171,7 @@ function formatEta(seconds){
   return s > 0 ? `~ ${m} ${min} ${s} ${d.etaSec || 'сек'}` : `~ ${m} ${min}`;
 }
 
-// Обновление соотношения валид/невалид в реальном времени
-function updateRatio(validCount, badCount, doneCount){
+function updateRatio(validCount, badCount){
   if(!ratioValid || !ratioInvalid || !ratioLabel) return;
   const total = validCount + badCount;
   const pValid = total ? Math.round((validCount / total) * 100) : 0;
@@ -161,9 +179,12 @@ function updateRatio(validCount, badCount, doneCount){
   ratioValid.style.width   = pValid + '%';
   ratioInvalid.style.width = pBad + '%';
   ratioLabel.innerHTML = `<span class="v">✓ ${validCount} (${pValid}%)</span> · <span class="x">✗ ${badCount} (${pBad}%)</span>`;
+  if(cntValidEl)   animateCount(cntValidEl, validCount);
+  if(cntInvalidEl) animateCount(cntInvalidEl, badCount);
 }
 
-// ───────── флаг отмены (внешний для обработчиков) ─────────
+// ───────── состояние и отмена ─────────
+let abortCtrl = null;
 let cancelRequested = false;
 
 // ───────── основная кнопка «Проверить» ─────────
@@ -176,20 +197,24 @@ checkBtn.addEventListener('click', async () => {
   invalidEl.value = '';
   if(dupesEl) dupesEl.value = '';
   if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+  if(cntValidEl)   cntValidEl.textContent   = '0';
+  if(cntInvalidEl) cntInvalidEl.textContent = '0';
+  if(cntDoneEl)    cntDoneEl.textContent    = '0';
+  if(cntTotalEl)   cntTotalEl.textContent   = '0';
 
   statsEl.textContent = `Найдено ID: ${ids.length}`;
   if(ids.length === 0) return;
 
-  // UI: старт проверки
+  // UI: старт
   cancelRequested = false;
+  abortCtrl = new AbortController();
   checkBtn.classList.add('hidden');
   if(stopBtn) stopBtn.classList.remove('hidden');
   progressWrap.classList.remove('hidden');
+  progressWrap.classList.add('is-running');
   updateProgress(0, ids.length);
-  updateRatio(0, 0, 0);
+  updateRatio(0, 0);
 
-  // показываем блок результатов сразу (поля пустые, но видны)
-  const resultsBlock = document.getElementById('results');
   if(resultsBlock) resultsBlock.classList.remove('hidden');
 
   const dict = showToast.messages || I18N[detectLang()];
@@ -198,59 +223,94 @@ checkBtn.addEventListener('click', async () => {
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   const startTime = Date.now();
 
-  let doneCount  = 0;
   let validCount = 0;
   let badCount   = 0;
+  let doneCount  = 0;
+  const seenIds  = new Set();
 
-  // трекаем уже обработанные ID, чтобы правильно складывать дубли
-  const seenIds = new Set();
+  // делаем строки с дублями ID видимыми сразу — даже до прихода ответа
+  // (одна строка на ID, остальные → дубли)
+  for(const id of ids){
+    const arr = idToLines.get(id) || [];
+    arr.slice(1).forEach(l => appendLine(dupesEl, l));
+  }
+
+  const onResult = ({ id, valid }) => {
+    if(seenIds.has(id)) return;
+    seenIds.add(id);
+    const arr = idToLines.get(id) || [];
+    if(arr.length === 0) return;
+    if(valid){ appendLine(validEl,   arr[0]); validCount++; }
+    else     { appendLine(invalidEl, arr[0]); badCount++;   }
+  };
 
   try{
-    await runPool(
+    await streamCheck({
+      base,
       ids,
-      25, // количество параллельных воркеров
-      async (id) => {
-        const { valid } = await checkOneId(base, id);
-
-        // определяем строки для этого ID
-        const arr = idToLines.get(id) || [];
-        if(arr.length > 0 && !seenIds.has(id)){
-          seenIds.add(id);
-          // первая строка — в нужный список
-          if(valid){ appendLine(validEl, arr[0]); validCount++; }
-          else      { appendLine(invalidEl, arr[0]); badCount++; }
-          // остальные строки того же ID — в дубли
-          arr.slice(1).forEach(l => appendLine(dupesEl, l));
-        }
-
-        doneCount++;
-        updateProgress(doneCount, ids.length);
-        updateRatio(validCount, badCount, doneCount);
+      signal: abortCtrl.signal,
+      onStart: ({ total }) => {
+        updateProgress(0, total || ids.length);
+      },
+      onBatch: ({ results, done, total }) => {
+        for(const r of results) onResult(r);
+        doneCount = done;
+        updateProgress(done, total);
+        updateRatio(validCount, badCount);
         if(etaEl){
-          if(doneCount >= 5){
+          if(done >= 5){
             const elapsedSec = (Date.now() - startTime) / 1000;
-            const rate = doneCount / elapsedSec;
-            const remaining = ids.length - doneCount;
-            const etaSec = remaining / rate;
+            const rate = done / elapsedSec;
+            const remaining = total - done;
+            const etaSec = remaining / Math.max(rate, 0.001);
             etaEl.textContent = formatEta(etaSec);
             etaEl.classList.remove('hidden');
           }
         }
-        statsEl.textContent = `${dict.checking || 'Проверка…'} ${doneCount}/${ids.length}`;
+        statsEl.textContent = `${dict.checking || 'Проверка…'} ${done}/${total}`;
       },
-      () => cancelRequested
-    );
+      onError: ({ message }) => {
+        if(errorEl){
+          errorEl.textContent = (dict.networkError || 'Network error') + ': ' + message;
+          errorEl.classList.remove('hidden');
+        }
+      },
+    });
   }catch(err){
-    statsEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
-    if(errorEl){
-      errorEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err);
-      errorEl.classList.remove('hidden');
+    const aborted = err?.name === 'AbortError' || cancelRequested;
+    if(!aborted){
+      // fallback: один батч через bulk endpoint
+      try{
+        const resp = await fetch(`${base}/api/check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+        if(resp.ok){
+          const data = await resp.json();
+          (data.valid   || []).forEach(id => onResult({ id, valid: true  }));
+          (data.invalid || []).forEach(id => onResult({ id, valid: false }));
+          doneCount = ids.length;
+          updateProgress(doneCount, ids.length);
+          updateRatio(validCount, badCount);
+        } else {
+          throw new Error('HTTP ' + resp.status);
+        }
+      }catch(err2){
+        statsEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err2);
+        if(errorEl){
+          errorEl.textContent = (dict.networkError || 'Network error') + ': ' + String(err2);
+          errorEl.classList.remove('hidden');
+        }
+      }
     }
   }finally{
-    // UI: конец проверки
     checkBtn.classList.remove('hidden');
     if(stopBtn) stopBtn.classList.add('hidden');
     if(etaEl) etaEl.classList.add('hidden');
+    progressWrap.classList.remove('is-running');
+    progressWrap.classList.add('is-done');
+    setTimeout(() => progressWrap.classList.remove('is-done'), 1200);
 
     const total = validCount + badCount;
     const pv = total ? Math.round((validCount / total) * 1000) / 10 : 0;
@@ -263,6 +323,7 @@ checkBtn.addEventListener('click', async () => {
     }else{
       statsEl.innerHTML = `<span class="summary">${dict.summaryPrefix} <span class="ok">${dict.validWord}: ${validCount} (${pv}%)</span>, <span class="bad">${dict.blockedWord}: ${badCount} (${pb}%)</span>${dupInfo}</span>`;
     }
+    abortCtrl = null;
   }
 });
 
@@ -272,8 +333,10 @@ if(stopBtn){
   stopBtn.addEventListener('click', () => {
     cancelRequested = true;
     stopBtn.disabled = true;
+    if(abortCtrl){ try { abortCtrl.abort(); } catch(_) {} }
     const dict = showToast.messages || I18N[detectLang()];
     statsEl.textContent = dict.stopping || 'Останавливаем…';
+    setTimeout(() => { stopBtn.disabled = false; }, 600);
   });
 }
 
@@ -325,7 +388,6 @@ if(uploadZone && fileInput){
 
 window.addEventListener('DOMContentLoaded', () => {
   updateInputStats();
-  // фоновый пинг сервера при загрузке страницы, чтобы к моменту нажатия кнопки сервер уже был тёплым
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   warmUp(`${base}/api/ping`).catch(() => {});
 });
@@ -396,9 +458,13 @@ if(clearAllBtn){
     statsEl.textContent = '';
     if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
     progressWrap.classList.add('hidden');
+    progressWrap.classList.remove('is-running','is-done');
     updateProgress(0, 0);
-    updateRatio(0, 0, 0);
-    const resultsBlock = document.getElementById('results');
+    updateRatio(0, 0);
+    if(cntValidEl)   cntValidEl.textContent   = '0';
+    if(cntInvalidEl) cntInvalidEl.textContent = '0';
+    if(cntDoneEl)    cntDoneEl.textContent    = '0';
+    if(cntTotalEl)   cntTotalEl.textContent   = '0';
     if(resultsBlock) resultsBlock.classList.add('hidden');
     updateInputStats();
     keepStartVisible(inputEl);
