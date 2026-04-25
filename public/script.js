@@ -67,22 +67,30 @@ function animateCount(el, target){
 }
 
 // ───────── извлечение ID ─────────
-
+//
+// Под NPPR-API мы шлём ПОЛНЫЕ строки (с cookies/access_token внутри),
+// а не голые ID — это даёт настоящую проверку сессии.
+// Дедуп по FB ID: первая встреча — отправляется на бэк, остальные → дубли.
+// Строки без FB ID игнорируются (UI их не показывал и раньше).
 function extractIdsFromLines(text){
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const entries = [];
-  const idToLines = new Map();
+  const idToLines = new Map();   // id → [original lines]
+  const lineToId  = new Map();   // primaryLine → id
+  const ids = [];                 // в порядке первого появления
   for(const line of lines){
     const firstMatch = line.match(idRegex);
-    if(firstMatch && firstMatch.length > 0){
-      const id = firstMatch[0];
-      entries.push({ id, line });
-      if(!idToLines.has(id)) idToLines.set(id, []);
-      idToLines.get(id).push(line);
+    if(!firstMatch || !firstMatch.length) continue;
+    const id = firstMatch[0];
+    if(!idToLines.has(id)){
+      idToLines.set(id, []);
+      ids.push(id);
+      lineToId.set(line, id);
     }
+    idToLines.get(id).push(line);
   }
-  const ids = uniquePreserveOrder(entries.map(e => e.id));
-  return { entries, ids, idToLines };
+  // primaryLines: первая строка для каждого ID — её отправляем на бэк
+  const primaryLines = ids.map(id => idToLines.get(id)[0]);
+  return { ids, idToLines, primaryLines, lineToId };
 }
 
 // ───────── warm-up ─────────
@@ -104,14 +112,14 @@ async function warmUp(pingUrl){
 }
 
 // ───────── stream-проверка через SSE ─────────
-// Один POST, сервер стримит результаты по 50 ID за раз.
-// onBatch({results:[{id,valid}], done, total}); onEnd({total,valid,invalid})
-async function streamCheck({ base, ids, signal, onStart, onBatch, onEnd, onError }){
+// Один POST, сервер стримит результаты по 50 строк за раз.
+// onBatch({results:[{line,id,valid,status}], done, total}); onEnd({total,valid,invalid,breakdown})
+async function streamCheck({ base, lines, signal, onStart, onBatch, onEnd, onError }){
   const url = `${base}/api/check/stream`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({ lines }),
     signal,
   });
   if(!resp.ok || !resp.body){
@@ -190,7 +198,7 @@ let cancelRequested = false;
 // ───────── основная кнопка «Проверить» ─────────
 
 checkBtn.addEventListener('click', async () => {
-  const { ids, idToLines } = extractIdsFromLines(inputEl.value);
+  const { ids, idToLines, primaryLines, lineToId } = extractIdsFromLines(inputEl.value);
 
   // сброс предыдущих результатов
   validEl.value   = '';
@@ -226,28 +234,33 @@ checkBtn.addEventListener('click', async () => {
   let validCount = 0;
   let badCount   = 0;
   let doneCount  = 0;
-  const seenIds  = new Set();
+  const seenLines = new Set();
 
-  // делаем строки с дублями ID видимыми сразу — даже до прихода ответа
-  // (одна строка на ID, остальные → дубли)
+  // дубли строк с тем же ID — видимые сразу
   for(const id of ids){
     const arr = idToLines.get(id) || [];
     arr.slice(1).forEach(l => appendLine(dupesEl, l));
   }
 
-  const onResult = ({ id, valid }) => {
-    if(seenIds.has(id)) return;
-    seenIds.add(id);
-    const arr = idToLines.get(id) || [];
-    if(arr.length === 0) return;
-    if(valid){ appendLine(validEl,   arr[0]); validCount++; }
-    else     { appendLine(invalidEl, arr[0]); badCount++;   }
+  // results from backend keyed by `line` (NPPR mode), но ради совместимости
+  // с возможным fallback по ID — поддерживаем оба пути.
+  const onResult = ({ line, id, valid }) => {
+    let primary = line;
+    if(!primary && id){
+      const arr = idToLines.get(id) || [];
+      primary = arr[0];
+    }
+    if(!primary) return;
+    if(seenLines.has(primary)) return;
+    seenLines.add(primary);
+    if(valid){ appendLine(validEl,   primary); validCount++; }
+    else     { appendLine(invalidEl, primary); badCount++;   }
   };
 
   try{
     await streamCheck({
       base,
-      ids,
+      lines: primaryLines,
       signal: abortCtrl.signal,
       onStart: ({ total }) => {
         updateProgress(0, total || ids.length);
@@ -284,12 +297,12 @@ checkBtn.addEventListener('click', async () => {
         const resp = await fetch(`${base}/api/check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids }),
+          body: JSON.stringify({ lines: primaryLines }),
         });
         if(resp.ok){
           const data = await resp.json();
-          (data.valid   || []).forEach(id => onResult({ id, valid: true  }));
-          (data.invalid || []).forEach(id => onResult({ id, valid: false }));
+          (data.valid   || []).forEach(line => onResult({ line, valid: true  }));
+          (data.invalid || []).forEach(line => onResult({ line, valid: false }));
           doneCount = ids.length;
           updateProgress(doneCount, ids.length);
           updateRatio(validCount, badCount);
