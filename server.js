@@ -22,8 +22,14 @@ const FB_CHECK_BATCH_SIZE  = 50;
 const FB_CHECK_RETRY_COUNT = 2;
 const FB_CHECK_RETRY_DELAY = 1_000;
 
+// SSE-стрим: сколько батчей по 50 ID пускать наверх параллельно.
+// В основной панели фронт держит CONCURRENCY=1, а PHP-бэкенд через curl_multi
+// параллелит до ~10 батчей. Здесь делаем то же на уровне Node.
+const STREAM_UPSTREAM_CONCURRENCY = 4;
+
 // FB ID: 10... или 61..., далее 10–23 алфавитно-цифровых символа
 const FB_ID_REGEX = /\b(?:10|61)[0-9A-Za-z]{10,23}\b/g;
+const FB_ID_SHAPE = /^(?:10|61)[0-9A-Za-z]{10,23}$/;
 
 // Окно склейки одиночных GET /api/get_uid/:id в один upstream POST
 const COALESCE_WINDOW_MS = 50;
@@ -65,54 +71,69 @@ async function fetchWithRetry(url, options) {
   throw lastErr || new Error('upstream request failed');
 }
 
+// Один батч → upstream → { id: bool }. signal — опциональный AbortSignal.
+async function checkOneBatch(batch, signal) {
+  const result = Object.create(null);
+  for (const id of batch) result[id] = false;
+  let resp;
+  try {
+    resp = await fetchWithRetry(FB_CHECK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        inputData: batch,
+        checkFriends: false,
+        userLang: 'ru',
+      }),
+      signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    console.error('[check.fb.tools] batch failed:', err?.message || err);
+    return result;
+  }
+  let body;
+  try {
+    body = await resp.json();
+  } catch (err) {
+    console.error('[check.fb.tools] bad json:', err?.message || err);
+    return result;
+  }
+  if (!body || !Array.isArray(body.data)) return result;
+  for (const entry of body.data) {
+    const acc = String(entry?.account ?? '');
+    const status = String(entry?.status?.name ?? '');
+    if (acc) result[acc] = status === 'valid';
+  }
+  return result;
+}
+
+function chunkIds(ids) {
+  const unique = [...new Set(ids.map(String).filter(Boolean))];
+  const batches = [];
+  for (let i = 0; i < unique.length; i += FB_CHECK_BATCH_SIZE) {
+    batches.push(unique.slice(i, i + FB_CHECK_BATCH_SIZE));
+  }
+  return { unique, batches };
+}
+
 // Массовая проверка через check.fb.tools. На вход — массив FB ID.
 // На выход — { id: true|false }. Аналог AccountValidationService::checkFbIdsBulk.
 async function checkFbIdsBulk(fbIds) {
   const result = Object.create(null);
   if (!Array.isArray(fbIds) || fbIds.length === 0) return result;
 
-  const unique = [...new Set(fbIds.map(String).filter(Boolean))];
+  const { unique, batches } = chunkIds(fbIds);
   for (const id of unique) result[id] = false;
-
-  const batches = [];
-  for (let i = 0; i < unique.length; i += FB_CHECK_BATCH_SIZE) {
-    batches.push(unique.slice(i, i + FB_CHECK_BATCH_SIZE));
-  }
 
   // Параллельно (эквивалент curl_multi на PHP).
   await Promise.all(
     batches.map(async (batch) => {
-      let resp;
-      try {
-        resp = await fetchWithRetry(FB_CHECK_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            inputData: batch,
-            checkFriends: false,
-            userLang: 'ru',
-          }),
-        });
-      } catch (err) {
-        console.error('[check.fb.tools] batch failed:', err?.message || err);
-        return;
-      }
-      let body;
-      try {
-        body = await resp.json();
-      } catch (err) {
-        console.error('[check.fb.tools] bad json:', err?.message || err);
-        return;
-      }
-      if (!body || !Array.isArray(body.data)) return;
-      for (const entry of body.data) {
-        const acc = String(entry?.account ?? '');
-        const status = String(entry?.status?.name ?? '');
-        if (acc) result[acc] = status === 'valid';
-      }
+      const part = await checkOneBatch(batch);
+      for (const id of batch) result[id] = part[id] === true;
     })
   );
 
@@ -288,6 +309,101 @@ app.post('/api/check/extract', async (req, res) => {
     invalid,
     total: items.length,
   });
+});
+
+// Стриминг результатов проверки по мере прихода ответов от check.fb.tools.
+// Server-Sent Events (text/event-stream). Один HTTP-запрос с фронта вместо N.
+//
+// POST /api/check/stream  body: { ids: ["...", "..."] }
+// Events:
+//   event: start  data: { total }
+//   event: batch  data: { results: [{id, valid}, ...], done, total }
+//   event: end    data: { total, valid, invalid }
+//   event: error  data: { message }
+app.post('/api/check/stream', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => String(x).trim()) : [];
+  const filtered = ids.filter((id) => FB_ID_SHAPE.test(id));
+  const { unique, batches } = chunkIds(filtered);
+
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const send = (event, data) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Heartbeat — некоторые reverse-proxy режут idle-соединения через 30 c.
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(`: ping ${Date.now()}\n\n`);
+  }, 15_000);
+
+  const ctrl = new AbortController();
+  let cancelled = false;
+  const onClose = () => {
+    cancelled = true;
+    ctrl.abort();
+    clearInterval(heartbeat);
+  };
+  req.on('close', onClose);
+
+  send('start', { total: unique.length, batches: batches.length });
+  if (unique.length === 0) {
+    send('end', { total: 0, valid: 0, invalid: 0 });
+    clearInterval(heartbeat);
+    return res.end();
+  }
+
+  let done = 0;
+  let validCount = 0;
+  let invalidCount = 0;
+
+  // Воркер-пул на бэке: до STREAM_UPSTREAM_CONCURRENCY одновременных батчей.
+  let nextBatch = 0;
+  async function worker() {
+    while (!cancelled && nextBatch < batches.length) {
+      const idx = nextBatch++;
+      const batch = batches[idx];
+      let part;
+      try {
+        part = await checkOneBatch(batch, ctrl.signal);
+      } catch (err) {
+        if (cancelled || err?.name === 'AbortError') return;
+        part = Object.create(null);
+        for (const id of batch) part[id] = false;
+      }
+      if (cancelled) return;
+
+      const results = batch.map((id) => {
+        const valid = part[id] === true;
+        if (valid) validCount++; else invalidCount++;
+        return { id, valid };
+      });
+      done += batch.length;
+      send('batch', { results, done, total: unique.length });
+    }
+  }
+
+  try {
+    const workers = Array.from(
+      { length: Math.min(STREAM_UPSTREAM_CONCURRENCY, batches.length) },
+      () => worker()
+    );
+    await Promise.all(workers);
+    if (!cancelled) {
+      send('end', { total: unique.length, valid: validCount, invalid: invalidCount });
+    }
+  } catch (err) {
+    send('error', { message: String(err?.message || err) });
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
 });
 
 app.listen(PORT, () => {

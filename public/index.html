@@ -3,9 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="description" content="Чекер аккаунтов Facebook — быстрая массовая проверка ID через check.fb.tools" />
     <title>FB Account Checker</title>
-    <!-- gh-pages redeploy trigger -->
-    <link rel="stylesheet" href="styles.css?v=20260215" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260425" />
+    <link rel="alternate icon" type="image/svg+xml" sizes="32x32" href="favicon-32.svg?v=20260425" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.svg?v=20260425" />
+    <link rel="manifest" href="site.webmanifest?v=20260425" />
+    <link rel="stylesheet" href="styles.css?v=20260425" />
   </head>
   <body>
     <header class="topbar"></header>
@@ -78,7 +83,9 @@
           <div id="progressWrap" class="progress-wrap hidden">
             <div class="progress-row">
               <div class="progress-track">
-                <div id="progressBar" class="progress-bar-fill" style="width:0%"></div>
+                <div id="progressBar" class="progress-bar-fill" style="width:0%">
+                  <span class="progress-shine" aria-hidden="true"></span>
+                </div>
               </div>
               <span id="progressLabel" class="progress-label">0 / 0</span>
               <span id="etaEl" class="eta-label hidden">~ 0</span>
@@ -88,7 +95,28 @@
                 <div id="ratioValid" class="ratio-segment ratio-valid" style="width:0%"></div>
                 <div id="ratioInvalid" class="ratio-segment ratio-invalid" style="width:0%"></div>
               </div>
-              <span id="ratioLabel" class="ratio-label">✓ 0% · ✗ 0%</span>
+              <span id="ratioLabel" class="ratio-label"><span class="v">✓ 0</span> · <span class="x">✗ 0</span></span>
+            </div>
+            <div class="counters" id="counters">
+              <div class="counter counter--valid">
+                <span class="counter-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <span class="counter-num" id="cntValid">0</span>
+                <span class="counter-lbl" data-i18n="validWord">валидных</span>
+              </div>
+              <div class="counter counter--invalid">
+                <span class="counter-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+                </span>
+                <span class="counter-num" id="cntInvalid">0</span>
+                <span class="counter-lbl" data-i18n="blockedWord">заблокировано</span>
+              </div>
+              <div class="counter counter--total">
+                <span class="counter-num" id="cntDone">0</span>
+                <span class="counter-sep">/</span>
+                <span class="counter-num" id="cntTotal">0</span>
+              </div>
             </div>
           </div>
         </div>

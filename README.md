@@ -23,15 +23,17 @@ API endpoints
 -------------
 
 - `GET /api/ping` — health check / wake-up.
-- `GET /api/get_uid/:id` — single-ID lookup (used by the bundled frontend). Internally batched.
-- `POST /api/check` — bulk lookup. Body: `{ "ids": ["10...", "61...", ...] }`. Returns `{ valid, invalid, total }`.
+- `POST /api/check/stream` — **streaming bulk check (preferred)**. Body: `{ "ids": [...] }`. Emits Server-Sent Events: `start { total, batches }` → `batch { results: [{id, valid}], done, total }` per upstream batch → `end { total, valid, invalid }`. Heartbeat comments every 15 s. The frontend uses this to draw a smooth live progress bar with no extra HTTP overhead.
+- `POST /api/check` — bulk one-shot lookup. Body: `{ "ids": [...] }`. Returns `{ valid, invalid, total }`. Used as fallback if SSE is unavailable.
 - `POST /api/check/extract` — extract FB IDs from arbitrary blobs (cookies / social URLs / raw lines) and validate. Body: `{ "rows": [{ id?, login?, id_soc_account?, social_url?, cookies?, line?, text? }] }`. A row is considered valid if **any** of its extracted FB IDs is valid (mirrors `AccountValidationService::checkItems` from the main panel).
+- `GET /api/get_uid/:id` — single-ID lookup, kept for backward compatibility. Concurrent calls are coalesced into one upstream batch.
 
 Notes
 -----
 
 - Upstream batches: 50 IDs per request, 2 retries with 1 s delay, 15 s timeout — matches the main panel's `Config.php` constants.
-- The frontend uses 25 parallel workers; the backend collapses them into ~1 upstream POST per 50 IDs.
+- Streaming runs up to 4 upstream batches in parallel inside one HTTP request from the browser.
+- App icon: `public/favicon.svg` (animated gradient + checkmark). Apple touch icon and PWA manifest included.
 
 Deploy (Render) — Вариант 1: всё на одном домене
 ------------------------------------------------
