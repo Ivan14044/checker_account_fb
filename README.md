@@ -1,7 +1,7 @@
 FB Account Checker
 ==================
 
-Minimal web app to validate Facebook account IDs via a Node.js proxy to `https://getuid.live/get_uid/{id}`.
+Minimal web app to validate Facebook account IDs. Backend is a Node.js service that batches IDs and queries `https://check.fb.tools/api/check/account` (the same upstream used by the main dashboard panel).
 
 Run
 ---
@@ -15,14 +15,23 @@ Open: `http://localhost:3000`.
 How it works
 ------------
 
-- Extracts IDs by regex: `\b(10|61)[0-9A-Za-z]{10,23}\b` from pasted lines.
-- For each ID calls GET `/api/get_uid/:id` (server proxies `https://getuid.live/get_uid/:id`). Response `{"uid":null}` = blocked, otherwise = valid.
+- Extracts IDs by regex: `\b(10|61)[0-9A-Za-z]{10,23}\b` from pasted lines / cookies / social URLs.
+- The frontend (`public/script.js`) calls `GET /api/get_uid/:id` per ID. The server **coalesces** concurrent requests into upstream batches of up to 50 IDs and POSTs them to `check.fb.tools`. The `{ "uid": null }` / `{ "uid": "<id>" }` response shape is preserved — the frontend keeps working unchanged.
 - Splits results into "Валидные" and "Невалидные/Заблокированные".
+
+API endpoints
+-------------
+
+- `GET /api/ping` — health check / wake-up.
+- `GET /api/get_uid/:id` — single-ID lookup (used by the bundled frontend). Internally batched.
+- `POST /api/check` — bulk lookup. Body: `{ "ids": ["10...", "61...", ...] }`. Returns `{ valid, invalid, total }`.
+- `POST /api/check/extract` — extract FB IDs from arbitrary blobs (cookies / social URLs / raw lines) and validate. Body: `{ "rows": [{ id?, login?, id_soc_account?, social_url?, cookies?, line?, text? }] }`. A row is considered valid if **any** of its extracted FB IDs is valid (mirrors `AccountValidationService::checkItems` from the main panel).
 
 Notes
 -----
 
-- Large lists are processed in batches (parallel requests, 20 at a time).
+- Upstream batches: 50 IDs per request, 2 retries with 1 s delay, 15 s timeout — matches the main panel's `Config.php` constants.
+- The frontend uses 25 parallel workers; the backend collapses them into ~1 upstream POST per 50 IDs.
 
 Deploy (Render) — Вариант 1: всё на одном домене
 ------------------------------------------------
