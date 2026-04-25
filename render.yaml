@@ -9,4 +9,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 18
+      - key: NPPR_TOKEN
+        sync: false
 
