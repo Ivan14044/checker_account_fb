@@ -312,6 +312,29 @@ button:disabled{opacity:.6;cursor:not-allowed}
   background:#ecfdf5;
 }
 
+/* ========== Ссылки на профили валидных аккаунтов ========== */
+.result-links{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+}
+.result-link{
+  display:inline-block;
+  max-width:100%;
+  padding:3px 10px;
+  border-radius:40px;
+  border:1px solid #bbf7d0;
+  background:#ecfdf5;
+  color:#047857;
+  font-size:12px;
+  text-decoration:none;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.result-link:hover{background:#1ECD97;color:#fff;border-color:#1ECD97}
+
 /* ========== 2FA генератор ========== */
 .otp-card{display:flex;flex-direction:column}
 .otp-input{

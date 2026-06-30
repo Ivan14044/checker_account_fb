@@ -9,4 +9,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 18
+      # CORS allowlist: фронт на GitHub Pages + сам Render-домен.
+      # Добавьте сюда свой кастомный домен, если используете.
+      - key: ALLOWED_ORIGINS
+        value: "https://ivan14044.github.io,https://checker-account-fb.onrender.com"
 

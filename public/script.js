@@ -23,6 +23,7 @@ const cntInvalidEl = document.getElementById('cntInvalid');
 const cntDoneEl    = document.getElementById('cntDone');
 const cntTotalEl   = document.getElementById('cntTotal');
 const resultsBlock = document.getElementById('results');
+const validLinksEl = document.getElementById('validLinks');
 
 // ID regex: аккаунты начинаются с 10 или 61, затем 10–23 алфавитно-цифровых символа
 const idRegex = /(\b(?:10|61)[0-9A-Za-z]{10,23}\b)/g;
@@ -41,6 +42,20 @@ function uniquePreserveOrder(items){
 function appendLine(el, line){
   if(!el) return;
   el.value = el.value ? el.value + '\n' + line : line;
+}
+
+// Кликабельная ссылка на профиль валидного аккаунта (отдельно от textarea,
+// чтобы не ломать копирование/экспорт исходных строк).
+function appendProfileLink(url){
+  if(!validLinksEl || !url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.className = 'result-link';
+  a.textContent = String(url).replace(/^https?:\/\/(www\.)?/, '');
+  validLinksEl.appendChild(a);
+  validLinksEl.classList.remove('hidden');
 }
 
 // плавный count-up для чисел в счётчиках
@@ -215,6 +230,7 @@ checkBtn.addEventListener('click', async () => {
   validEl.value   = '';
   invalidEl.value = '';
   if(dupesEl) dupesEl.value = '';
+  if(validLinksEl){ validLinksEl.innerHTML = ''; validLinksEl.classList.add('hidden'); }
   if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
   if(cntValidEl)   cntValidEl.textContent   = '0';
   if(cntInvalidEl) cntInvalidEl.textContent = '0';
@@ -255,7 +271,7 @@ checkBtn.addEventListener('click', async () => {
 
   // results from backend keyed by `line` (NPPR mode), но ради совместимости
   // с возможным fallback по ID — поддерживаем оба пути.
-  const onResult = ({ line, id, valid }) => {
+  const onResult = ({ line, id, valid, profileLink }) => {
     let primary = line;
     if(!primary && id){
       const arr = idToLines.get(id) || [];
@@ -264,8 +280,11 @@ checkBtn.addEventListener('click', async () => {
     if(!primary) return;
     if(seenLines.has(primary)) return;
     seenLines.add(primary);
-    if(valid){ appendLine(validEl,   primary); validCount++; }
-    else     { appendLine(invalidEl, primary); badCount++;   }
+    if(valid){
+      appendLine(validEl, primary); validCount++;
+      appendProfileLink(profileLink);
+    }
+    else { appendLine(invalidEl, primary); badCount++; }
   };
 
   try{
@@ -479,6 +498,7 @@ if(clearAllBtn){
     validEl.value   = '';
     invalidEl.value = '';
     if(dupesEl) dupesEl.value = '';
+    if(validLinksEl){ validLinksEl.innerHTML = ''; validLinksEl.classList.add('hidden'); }
     statsEl.textContent = '';
     if(errorEl){ errorEl.textContent = ''; errorEl.classList.add('hidden'); }
     progressWrap.classList.add('hidden');
