@@ -32,7 +32,9 @@ body{
 .icon-btn{background:transparent;border:1px solid #2a3153;color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer}
 .secondary{background:#263056;border:1px solid #2a3153}
 .error{background:#2b1620;color:#ffd6e0;border:1px solid #5b2136;padding:10px 12px;border-radius:8px;margin-bottom:12px}
-.preloader{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:9999}
+/* pointer-events:none — прелоадер чисто косметический и НЕ должен перехватывать
+   клики, пока виден (иначе клики до window 'load' теряются). */
+.preloader{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none}
 .preloader.hidden{display:none}
 .hidden{display:none}
 .preloader svg{height:150px;width:150px}

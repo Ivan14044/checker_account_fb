@@ -429,15 +429,21 @@ if(uploadZone && fileInput){
 
 // ───────── старт: фоновый warm-up + инициализация UI ─────────
 
+// Прелоадер — косметический оверлей. Скрываем его, как только приложение
+// интерактивно (DOMContentLoaded), а не по window 'load': иначе медленные/
+// зависшие внешние ресурсы держат оверлей и (до фикса pointer-events) клики
+// терялись. Несколько триггеров + таймаут — на случай любой задержки.
+function hidePreloader(){ if(preloader) preloader.classList.add('hidden'); }
+
 window.addEventListener('DOMContentLoaded', () => {
+  hidePreloader();
   updateInputStats();
   const base = (window.PROXY_BASE || '').replace(/\/$/, '');
   warmUp(`${base}/api/ping`).catch(() => {});
 });
 
-window.addEventListener('load', () => {
-  if(preloader) preloader.classList.add('hidden');
-});
+window.addEventListener('load', hidePreloader);
+setTimeout(hidePreloader, 3000);
 
 // ───────── GitHub Pages: предупреждение если нет PROXY_BASE ─────────
 
