@@ -66,31 +66,42 @@ function animateCount(el, target){
   countAnimMap.set(el, state);
 }
 
-// ───────── извлечение ID ─────────
+// ───────── извлечение записей ─────────
 //
-// Под NPPR-API мы шлём ПОЛНЫЕ строки (с cookies/access_token внутри),
-// а не голые ID — это даёт настоящую проверку сессии.
-// Дедуп по FB ID: первая встреча — отправляется на бэк, остальные → дубли.
-// Строки без FB ID игнорируются (UI их не показывал и раньше).
+// На бэк шлём ПОЛНЫЕ строки (FBID / profile URL / cookies) — upstream сам
+// извлекает аккаунт. Дедуп по ключу: FB ID, если он есть в строке, иначе —
+// сама строка (так проверяются и username-URL вроде facebook.com/zuck).
+// Ключ дублей: строки с одинаковым ключом → первая на бэк, остальные → дубли.
+// Строки, в которых нет ни FB ID, ни признаков аккаунта, игнорируются.
+function firstId(line){
+  const m = String(line).match(idRegex);
+  return m && m[0] ? m[0] : null;
+}
+function isCheckableLine(line, id){
+  if(id) return true;
+  return /facebook\.com\//i.test(line)
+      || /instagram\.com\//i.test(line)
+      || /(?:^|[;\s])c_user=/i.test(line);   // cookies-строка
+}
 function extractIdsFromLines(text){
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const idToLines = new Map();   // id → [original lines]
-  const lineToId  = new Map();   // primaryLine → id
-  const ids = [];                 // в порядке первого появления
+  const idToLines = new Map();   // key → [original lines]
+  const keyToId   = new Map();   // key → FB id (или null)
+  const ids = [];                 // ключи в порядке первого появления
   for(const line of lines){
-    const firstMatch = line.match(idRegex);
-    if(!firstMatch || !firstMatch.length) continue;
-    const id = firstMatch[0];
-    if(!idToLines.has(id)){
-      idToLines.set(id, []);
-      ids.push(id);
-      lineToId.set(line, id);
+    const id = firstId(line);
+    if(!isCheckableLine(line, id)) continue;
+    const key = id || line;       // дедуп по FB id, иначе по самой строке
+    if(!idToLines.has(key)){
+      idToLines.set(key, []);
+      keyToId.set(key, id);
+      ids.push(key);
     }
-    idToLines.get(id).push(line);
+    idToLines.get(key).push(line);
   }
-  // primaryLines: первая строка для каждого ID — её отправляем на бэк
-  const primaryLines = ids.map(id => idToLines.get(id)[0]);
-  return { ids, idToLines, primaryLines, lineToId };
+  // primaryLines: первая строка для каждого ключа — её отправляем на бэк
+  const primaryLines = ids.map(key => idToLines.get(key)[0]);
+  return { ids, idToLines, primaryLines, lineToId: keyToId };
 }
 
 // ───────── warm-up ─────────
@@ -210,7 +221,7 @@ checkBtn.addEventListener('click', async () => {
   if(cntDoneEl)    cntDoneEl.textContent    = '0';
   if(cntTotalEl)   cntTotalEl.textContent   = '0';
 
-  statsEl.textContent = `Найдено ID: ${ids.length}`;
+  statsEl.textContent = `Записей: ${ids.length}`;
   if(ids.length === 0) return;
 
   // UI: старт
@@ -358,7 +369,7 @@ if(stopBtn){
 function updateInputStats(){
   const linesCount = inputEl.value.split(/\r?\n/).filter(l => l.trim().length > 0).length;
   const { ids } = extractIdsFromLines(inputEl.value);
-  statsEl.textContent = `Строк: ${linesCount}, найдено ID: ${ids.length}`;
+  statsEl.textContent = `Строк: ${linesCount}, записей: ${ids.length}`;
 }
 
 inputEl.addEventListener('input', updateInputStats);

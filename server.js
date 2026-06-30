@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import path from 'path';
 import cors from 'cors';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,21 +22,57 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', 1); // за прокси Render — чтобы req.ip был реальным
 
-app.use(cors());
+// CORS: по умолчанию открыт; ALLOWED_ORIGINS (через запятую) включает allowlist.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+app.use(cors({
+  origin(origin, cb) {
+    if (!ALLOWED_ORIGINS.length) return cb(null, true); // нет списка → разрешаем всё
+    if (!origin) return cb(null, true);                 // curl / server-to-server
+    cb(null, ALLOWED_ORIGINS.includes(origin));
+  },
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ───────── NPPR Services API ─────────
-// https://npprservices.pro/api/services/fbchecker
-// Принимает ПОЛНЫЕ строки аккаунтов (cookies + token + ...). С checkToken:1
-// верифицирует через access_token внутри строки → реальная валидация сессии.
-const NPPR_URL          = 'https://npprservices.pro/api/services/fbchecker';
-const NPPR_TOKEN        = process.env.NPPR_TOKEN || '';
-const NPPR_BATCH_SIZE   = 50;
-const NPPR_TIMEOUT_MS   = 30_000;
-const NPPR_RETRY_COUNT  = 1;
-const NPPR_RETRY_DELAY  = 1_500;
+// ───────── простой in-memory rate-limit (без зависимостей) ─────────
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+const RATE_LIMIT_MAX       = Number(process.env.RATE_LIMIT_MAX) || 60;
+const rateHits = new Map(); // ip → number[] (таймстемпы запросов в окне)
+function rateLimit(req, res, next) {
+  const now = Date.now();
+  const ip = req.ip || 'unknown';
+  const arr = (rateHits.get(ip) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (arr.length >= RATE_LIMIT_MAX) {
+    res.set('Retry-After', String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)));
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+  arr.push(now);
+  rateHits.set(ip, arr);
+  next();
+}
+// периодическая чистка устаревших записей, чтобы Map не рос бесконечно
+const rateSweep = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, arr] of rateHits) {
+    const fresh = arr.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (fresh.length) rateHits.set(ip, fresh); else rateHits.delete(ip);
+  }
+}, RATE_LIMIT_WINDOW_MS);
+rateSweep.unref?.();
+
+// ───────── Checker upstream (check.fb.tools) ─────────
+// Публичный, без авторизации. Принимает массив строк (FBID / profile URL /
+// cookies) в поле inputData и возвращает по каждой строке статус живости.
+// Ответ: { data: [{ id, account, uid, status:{name,message}, origin, profileLink }],
+//          info: { valid, invalid, errors, noExist, checkedTime } }
+const CHECK_URL         = process.env.CHECK_URL || 'https://check.fb.tools/api/check/facebook';
+const CHECK_BATCH_SIZE  = 50;
+const CHECK_TIMEOUT_MS  = 30_000;
+const CHECK_RETRY_COUNT = 1;
+const CHECK_RETRY_DELAY = 1_500;
 
 // SSE: сколько upstream-батчей крутится параллельно.
 const STREAM_UPSTREAM_CONCURRENCY = 4;
@@ -48,13 +85,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // fetch с таймаутом и ретраями.
 async function fetchWithRetry(url, options) {
   let lastErr;
-  for (let attempt = 0; attempt <= NPPR_RETRY_COUNT; attempt++) {
-    if (attempt > 0) await sleep(NPPR_RETRY_DELAY);
+  for (let attempt = 0; attempt <= CHECK_RETRY_COUNT; attempt++) {
+    if (attempt > 0) await sleep(CHECK_RETRY_DELAY);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), NPPR_TIMEOUT_MS);
+    const timer = setTimeout(() => ctrl.abort(), CHECK_TIMEOUT_MS);
+    // если снаружи пришёл свой signal — пробрасываем abort
+    const onOuterAbort = () => ctrl.abort();
+    if (options?.signal) {
+      if (options.signal.aborted) ctrl.abort();
+      else options.signal.addEventListener('abort', onOuterAbort, { once: true });
+    }
     try {
       const resp = await fetch(url, { ...options, signal: ctrl.signal });
       clearTimeout(timer);
+      if (options?.signal) options.signal.removeEventListener?.('abort', onOuterAbort);
       if (!resp.ok) {
         lastErr = new Error(`HTTP ${resp.status}`);
         continue;
@@ -62,6 +106,9 @@ async function fetchWithRetry(url, options) {
       return resp;
     } catch (err) {
       clearTimeout(timer);
+      if (options?.signal) options.signal.removeEventListener?.('abort', onOuterAbort);
+      // внешняя отмена — не ретраим
+      if (options?.signal?.aborted) throw err;
       lastErr = err;
     }
   }
@@ -79,8 +126,8 @@ function chunkLines(lines) {
     unique.push(l);
   }
   const batches = [];
-  for (let i = 0; i < unique.length; i += NPPR_BATCH_SIZE) {
-    batches.push(unique.slice(i, i + NPPR_BATCH_SIZE));
+  for (let i = 0; i < unique.length; i += CHECK_BATCH_SIZE) {
+    batches.push(unique.slice(i, i + CHECK_BATCH_SIZE));
   }
   return { unique, batches };
 }
@@ -92,34 +139,26 @@ function firstFbId(line) {
   return m && m[0] ? m[0] : null;
 }
 
-// Один батч строк → NPPR → { line: 'active'|'banned'|'notFound'|'withoutToken'|'duplicate'|'error' }
+// Один батч строк → check.fb.tools → { line: { status, uid, profileLink } }
+// status ∈ 'valid'|'invalid'|'noexist'|'error'.
 async function checkOneBatch(batch, signal) {
   const result = Object.create(null);
-  for (const l of batch) result[l] = 'error';
-
-  if (!NPPR_TOKEN) {
-    console.error('[NPPR] NPPR_TOKEN env var is not set');
-    return result;
-  }
+  for (const l of batch) result[l] = { status: 'error', uid: null, profileLink: null };
 
   let resp;
   try {
-    resp = await fetchWithRetry(NPPR_URL, {
+    resp = await fetchWithRetry(CHECK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify({
-        token: NPPR_TOKEN,
-        accs: batch,
-        checkToken: 1,
-      }),
+      body: JSON.stringify({ inputData: batch }),
       signal,
     });
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
-    console.error('[NPPR] batch failed:', err?.message || err);
+    console.error('[check] batch failed:', err?.message || err);
     return result;
   }
 
@@ -127,31 +166,25 @@ async function checkOneBatch(batch, signal) {
   try {
     body = await resp.json();
   } catch (err) {
-    console.error('[NPPR] bad json:', err?.message || err);
+    console.error('[check] bad json:', err?.message || err);
     return result;
   }
 
-  // active — объект { lineString: fbId }
-  if (body && body.active && typeof body.active === 'object') {
-    for (const line of Object.keys(body.active)) result[line] = 'active';
-  }
-  // banned / notFound — массив строк
-  const markArray = (arr, label) => {
-    if (!Array.isArray(arr)) return;
-    for (const item of arr) {
-      if (typeof item === 'string') {
-        if (result[item] !== 'active') result[item] = label;
-      }
-    }
-  };
-  markArray(body?.banned, 'banned');
-  markArray(body?.notFound, 'notFound');
-  markArray(body?.duplicates, 'duplicate');
-  // withoutToken — лишь информативно: ставим только если ничего другого ещё не выставлено
-  if (Array.isArray(body?.withoutToken)) {
-    for (const item of body.withoutToken) {
-      if (typeof item === 'string' && result[item] === 'error') {
-        result[item] = 'withoutToken';
+  // data — массив { account, uid, status:{name}, origin, profileLink, ... }.
+  // origin == исходная строка, которую мы отправили (для URL/cookies отличается
+  // от account/uid); по нему и маппим, с откатом на account.
+  if (body && Array.isArray(body.data)) {
+    for (const item of body.data) {
+      const key = (typeof item?.origin === 'string') ? item.origin
+                : (typeof item?.account === 'string') ? item.account
+                : null;
+      if (key !== null && result[key] !== undefined) {
+        result[key] = {
+          status: item?.status?.name || 'error',
+          uid: typeof item?.uid === 'string' ? item.uid
+             : typeof item?.account === 'string' ? item.account : null,
+          profileLink: typeof item?.profileLink === 'string' ? item.profileLink : null,
+        };
       }
     }
   }
@@ -159,9 +192,13 @@ async function checkOneBatch(batch, signal) {
   return result;
 }
 
-// Бинарная классификация для UI: только 'active' = valid.
+// Бинарная классификация для UI: только 'valid' = valid.
 function isValidStatus(status) {
-  return status === 'active';
+  return status === 'valid';
+}
+
+function emptyBreakdown() {
+  return { valid: 0, invalid: 0, noexist: 0, error: 0 };
 }
 
 // Массовая проверка — на вход массив строк, на выход { line: status }.
@@ -173,21 +210,76 @@ async function checkLinesBulk(lines) {
   await Promise.all(
     batches.map(async (batch) => {
       const part = await checkOneBatch(batch);
-      for (const l of batch) result[l] = part[l] || 'error';
+      for (const l of batch) result[l] = part[l]?.status || 'error';
     })
   );
   return result;
 }
 
+// ───────── TOTP (RFC 6238) для 2FA-генератора ─────────
+// Base32-secret → 6-значный код. Без внешних зависимостей (node:crypto).
+function base32Decode(input) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = String(input).toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
+  if (!clean) throw new Error('empty secret');
+  let bits = 0;
+  let value = 0;
+  const bytes = [];
+  for (const ch of clean) {
+    const idx = alphabet.indexOf(ch);
+    if (idx === -1) throw new Error('invalid base32 character');
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((value >>> bits) & 0xff);
+    }
+  }
+  if (bytes.length === 0) throw new Error('empty secret');
+  return Buffer.from(bytes);
+}
+
+function generateTOTP(secret, { digits = 6, period = 30, timestamp = Date.now() } = {}) {
+  const key = base32Decode(secret);
+  const epoch = Math.floor(timestamp / 1000);
+  let counter = Math.floor(epoch / period);
+  const buf = Buffer.alloc(8);
+  for (let i = 7; i >= 0; i--) {
+    buf[i] = counter & 0xff;
+    counter = Math.floor(counter / 256);
+  }
+  const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code =
+    ((hmac[offset] & 0x7f) << 24) |
+    (hmac[offset + 1] << 16) |
+    (hmac[offset + 2] << 8) |
+    hmac[offset + 3];
+  const otp = String(code % 10 ** digits).padStart(digits, '0');
+  const timeRemaining = period - (epoch % period);
+  return { otp, timeRemaining };
+}
+
 // ───────── маршруты ─────────
 
 app.get('/api/ping', (_req, res) => {
-  res.json({ ok: true, time: Date.now(), upstream: 'nppr', tokenConfigured: !!NPPR_TOKEN });
+  res.json({ ok: true, time: Date.now(), upstream: 'check.fb.tools' });
+});
+
+// 2FA: GET /api/otp/:secret → { ok, data:{ otp, timeRemaining } }
+app.get('/api/otp/:secret', rateLimit, (req, res) => {
+  const secret = String(req.params.secret || '').trim();
+  if (!secret) return res.status(400).json({ ok: false, message: 'Missing secret' });
+  try {
+    const { otp, timeRemaining } = generateTOTP(secret);
+    res.json({ ok: true, data: { otp, timeRemaining } });
+  } catch (_err) {
+    res.status(400).json({ ok: false, message: 'Invalid secret' });
+  }
 });
 
 // Совместимость со старым фронтом: один ID → один ответ.
-// Под NPPR это работает в "deg мode" (без токена аккаунт уйдёт в notFound).
-app.get('/api/get_uid/:id', async (req, res) => {
+app.get('/api/get_uid/:id', rateLimit, async (req, res) => {
   const raw = String(req.params.id || '').trim();
   if (!raw) return res.status(400).json({ error: 'Missing id' });
   if (!/^(?:10|61)[0-9A-Za-z]{10,23}$/.test(raw)) {
@@ -204,8 +296,8 @@ app.get('/api/get_uid/:id', async (req, res) => {
 // Массовая проверка.
 // POST { lines: [...full account strings...] }  ← основной режим
 //   или { ids: [...] }                          ← legacy
-// → { valid: [...lines], invalid: [...lines], total, breakdown: {active,banned,notFound,withoutToken,duplicate,error} }
-app.post('/api/check', async (req, res) => {
+// → { valid: [...lines], invalid: [...lines], total, breakdown:{valid,invalid,noexist,error} }
+app.post('/api/check', rateLimit, async (req, res) => {
   const body = req.body || {};
   const rawInput = Array.isArray(body.lines) ? body.lines
                   : Array.isArray(body.ids)  ? body.ids
@@ -218,7 +310,7 @@ app.post('/api/check', async (req, res) => {
     const map = await checkLinesBulk(lines);
     const valid = [];
     const invalid = [];
-    const breakdown = { active: 0, banned: 0, notFound: 0, withoutToken: 0, duplicate: 0, error: 0 };
+    const breakdown = emptyBreakdown();
     for (const line of lines) {
       const status = map[line] || 'error';
       if (breakdown[status] !== undefined) breakdown[status]++;
@@ -234,10 +326,10 @@ app.post('/api/check', async (req, res) => {
 // SSE-стрим. POST { lines: [...] } (или { ids: [...] }).
 // Events:
 //   start  { total, batches }
-//   batch  { results: [{line, id, valid, status}, ...], done, total }
+//   batch  { results: [{line, id, uid, profileLink, valid, status}, ...], done, total }
 //   end    { total, valid, invalid, breakdown }
 //   error  { message }
-app.post('/api/check/stream', async (req, res) => {
+app.post('/api/check/stream', rateLimit, async (req, res) => {
   const body = req.body || {};
   const rawInput = Array.isArray(body.lines) ? body.lines
                   : Array.isArray(body.ids)  ? body.ids
@@ -283,7 +375,7 @@ app.post('/api/check/stream', async (req, res) => {
   let done = 0;
   let validCount = 0;
   let invalidCount = 0;
-  const breakdown = { active: 0, banned: 0, notFound: 0, withoutToken: 0, duplicate: 0, error: 0 };
+  const breakdown = emptyBreakdown();
 
   let nextBatch = 0;
   async function worker() {
@@ -296,16 +388,24 @@ app.post('/api/check/stream', async (req, res) => {
       } catch (err) {
         if (cancelled || err?.name === 'AbortError') return;
         part = Object.create(null);
-        for (const line of batch) part[line] = 'error';
+        for (const line of batch) part[line] = { status: 'error', uid: null, profileLink: null };
       }
       if (cancelled) return;
 
       const results = batch.map((line) => {
-        const status = part[line] || 'error';
+        const meta = part[line] || { status: 'error', uid: null, profileLink: null };
+        const status = meta.status || 'error';
         const valid = isValidStatus(status);
         if (valid) validCount++; else invalidCount++;
         if (breakdown[status] !== undefined) breakdown[status]++;
-        return { line, id: firstFbId(line), valid, status };
+        return {
+          line,
+          id: meta.uid || firstFbId(line),
+          uid: meta.uid || null,
+          profileLink: meta.profileLink || null,
+          valid,
+          status,
+        };
       });
       done += batch.length;
       send('batch', { results, done, total: unique.length });
@@ -331,5 +431,5 @@ app.post('/api/check/stream', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  if (!NPPR_TOKEN) console.warn('[NPPR] WARNING: NPPR_TOKEN env var is not set — checks will fail');
+  console.log(`[check] upstream: ${CHECK_URL}`);
 });

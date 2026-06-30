@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2FA Code Generator — FB Tools</title>
+    <link rel="stylesheet" href="styles.css?v=20260630a" />
+  </head>
+  <body>
+    <header class="topbar"></header>
+    <div class="container">
+      <nav class="app-nav">
+        <a href="index.html" class="app-nav-link">🔎 Checker</a>
+        <a href="2fa.html" class="app-nav-link active">🔐 2FA</a>
+      </nav>
+
+      <div id="error" class="error hidden" role="alert"></div>
+
+      <section class="hero-card">
+        <div class="hero-left">
+          <div class="hero-lang" role="group" aria-label="Language switch">
+            <button class="lang-btn" data-lang="ru" title="Русский">🇷🇺</button>
+            <button class="lang-btn" data-lang="uk" title="Українська">🇺🇦</button>
+            <button class="lang-btn" data-lang="en" title="English">🇬🇧</button>
+          </div>
+          <div class="hero-text">
+            <h2 data-i18n="title">Генератор 2FA-кодов</h2>
+            <p data-i18n="desc">Введите Base32-секрет (TOTP) — система покажет текущий 6-значный код по стандарту RFC 6238 (SHA-1, 30 секунд). Расчёт выполняется в браузере, секрет никуда не отправляется.</p>
+          </div>
+        </div>
+        <div class="hero-right" aria-hidden="true">Место под баннер (реклама)</div>
+      </section>
+
+      <h1 class="sr-only">Генератор 2FA-кодов</h1>
+
+      <div class="grid">
+        <div class="card otp-card">
+          <label for="secret" data-i18n="secretLabel">Секретный ключ (Base32):</label>
+          <input id="secret" class="shiny-field otp-input" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="Например: JBSWY3DPEHPK3PXP" />
+
+          <div id="otpBlock" class="otp-block hidden">
+            <button id="otpCode" class="otp-code" type="button" title="Нажмите, чтобы скопировать">000 000</button>
+            <div class="otp-copy" data-i18n="clickToCopy">Нажмите, чтобы скопировать</div>
+
+            <div class="progress-wrap">
+              <div class="progress-row">
+                <div class="progress-track">
+                  <div id="otpProgress" class="progress-bar-fill" style="width:100%"></div>
+                </div>
+                <span id="otpTimer" class="progress-label">30 c</span>
+              </div>
+            </div>
+
+            <div id="otpNext" class="otp-next"></div>
+          </div>
+
+          <div id="otpHint" class="otp-hint" data-i18n="hint">Поддерживаются буквы A–Z и цифры 2–7 (Base32).</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="config.js?v=20260630a"></script>
+    <script src="2fa.js?v=20260630a" type="module"></script>
+  </body>
+</html>

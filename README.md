@@ -1,111 +1,110 @@
-FB Account Checker
-==================
+FB Account Checker + 2FA
+========================
 
-Minimal web app to validate Facebook accounts. The backend is a Node.js service
-that batches **full account strings** (cookies + access token + …) and queries
-`https://npprservices.pro/api/services/fbchecker` with `checkToken: 1`, so the
-upstream actually verifies the live session via the embedded `access_token`
-rather than just looking up a bare ID.
+Web app with two modules:
+
+1. **Checker** — validate Facebook accounts (Live / Blocked / Doesn't exist).
+2. **2FA** — TOTP code generator (RFC 6238) from a Base32 secret.
+
+The backend is a small Node.js/Express service. The Checker proxies to
+`https://check.fb.tools/api/check/facebook` (public, **no token required**); the
+2FA generator computes TOTP locally with `node:crypto`. The frontend is plain
+JS/HTML/CSS in `public/` (no build step).
 
 Run
 ---
 
 1) Install deps: `npm install`
 
-2) Set the upstream token (see **Configuration** below): create a `.env` with
-   `NPPR_TOKEN=...`
+2) Start dev server: `npm run dev`
 
-3) Start dev server: `npm run dev`
-
-Open: `http://localhost:3000`.
+Open: `http://localhost:3000`. Switch between **Checker** and **2FA** from the
+top nav.
 
 Configuration
 -------------
 
-- `NPPR_TOKEN` — **required**. The API token for `npprservices.pro`. Without it
-  every check fails (the server logs a warning on boot and returns `error` for
-  each line). Read from `.env` locally; on Render it is set in the dashboard
-  (declared as `sync: false` in `render.yaml`).
-- `PORT` — optional, defaults to `3000`.
+No tokens needed. Optional env vars:
+
+- `PORT` — defaults to `3000`.
+- `CHECK_URL` — override the upstream checker endpoint (defaults to
+  `https://check.fb.tools/api/check/facebook`).
+- `ALLOWED_ORIGINS` — comma-separated CORS allowlist. Unset → all origins
+  allowed (default). Set to lock the API to specific frontends, e.g.
+  `https://checker-account-fb.onrender.com,https://<user>.github.io`.
+- `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — per-IP rate limit on the API
+  routes (defaults: `60` requests per `60000` ms). `/api/ping` is not limited.
 - `NODE_VERSION` — `18` (set on Render via `render.yaml`).
 
 How it works
 ------------
 
-- The frontend (`public/script.js`) extracts FB IDs with the regex
-  `\b(?:10|61)[0-9A-Za-z]{10,23}\b` purely to **deduplicate** input lines and
-  to show a short ID label per row. The *whole line* (cookies/token/…) is what
-  gets sent upstream — that is what enables real session validation.
-- Lines that share the same FB ID are deduped: the first occurrence is checked,
-  the rest are listed under "Дубли".
-- Each upstream batch returns a per-line status: `active`, `banned`,
-  `notFound`, `withoutToken`, `duplicate`, or `error`. Only `active` counts as
-  **valid**; everything else is shown as "Невалидные/Заблокированные".
+### Checker
+
+- The whole input line (FBID, profile URL, or cookies) is sent upstream. The
+  frontend extracts an FB ID with `\b(?:10|61)[0-9A-Za-z]{10,23}\b` to
+  **deduplicate** rows; lines without a numeric ID but with `facebook.com/`,
+  `instagram.com/`, or a `c_user=` cookie are still checked (e.g. username
+  URLs like `facebook.com/zuck`).
+- Each upstream batch returns, per input string, a `status.name`:
+  `valid` (Live) / `invalid` (Blocked) / `noexist` (Doesn't exist) / `error`.
+  Only `valid` counts as valid; everything else is shown as
+  "Невалидные/Заблокированные".
+- Results are mapped back by the upstream `origin` field (the exact string we
+  sent), which differs from `account`/`uid` for URL/cookie inputs.
+
+### 2FA
+
+- TOTP per RFC 6238: SHA-1, 6 digits, 30 s period. Base32 secret in, 6-digit
+  code out.
+- On the page (`public/2fa.html`) the code is computed **in the browser** via
+  Web Crypto — the secret never leaves the device. The backend also exposes a
+  public API (below). Verified against the RFC 6238 test vectors.
 
 API endpoints
 -------------
 
-- `GET /api/ping` — health check / wake-up. Returns `{ ok, time, upstream,
-  tokenConfigured }`.
+- `GET /api/ping` — health check / wake-up. Returns `{ ok, time, upstream }`.
 - `POST /api/check/stream` — **streaming bulk check (preferred)**. Body:
-  `{ "lines": [...] }` (legacy `{ "ids": [...] }` also accepted). Emits
-  Server-Sent Events:
+  `{ "lines": [...] }` (legacy `{ "ids": [...] }` also accepted). Emits SSE:
   `start { total, batches }` →
-  `batch { results: [{ line, id, valid, status }], done, total }` per upstream
-  batch →
+  `batch { results: [{ line, id, uid, profileLink, valid, status }], done, total }` →
   `end { total, valid, invalid, breakdown }`.
-  Heartbeat comments every 15 s. The frontend uses this to draw a live progress
-  bar with no extra HTTP overhead.
-- `POST /api/check` — bulk one-shot lookup. Body: `{ "lines": [...] }` (or
-  `{ "ids": [...] }`). Returns `{ valid, invalid, total, breakdown }`. Used as a
-  fallback if SSE is unavailable.
-- `GET /api/get_uid/:id` — single-ID lookup, kept only for backward
-  compatibility. **Note:** under the NPPR upstream a bare ID has no embedded
-  token, so it resolves to `notFound`/`withoutToken` and effectively always
-  returns `{ "uid": null }`. The current frontend no longer uses it.
+  Heartbeat comments every 15 s.
+- `POST /api/check` — bulk one-shot. Body: `{ "lines": [...] }`. Returns
+  `{ valid, invalid, total, breakdown: { valid, invalid, noexist, error } }`.
+  Fallback when SSE is unavailable.
+- `GET /api/get_uid/:id` — single-ID lookup (legacy compatibility).
+- `GET /api/otp/:secret` — 2FA TOTP for a Base32 secret. Returns
+  `{ ok: true, data: { otp, timeRemaining } }`, or `{ ok: false, message }` for
+  an invalid secret.
 
 Notes
 -----
 
-- Upstream batches: **50** lines per request, **1** retry with a **1.5 s**
-  delay, **30 s** timeout (`NPPR_*` constants in `server.js`).
-- Streaming runs up to **4** upstream batches in parallel inside one HTTP
-  request from the browser (`STREAM_UPSTREAM_CONCURRENCY`).
+- Upstream batches: **50** lines per request, **1** retry with **1.5 s** delay,
+  **30 s** timeout (`CHECK_*` constants in `server.js`).
+- Streaming runs up to **4** upstream batches in parallel per browser request
+  (`STREAM_UPSTREAM_CONCURRENCY`).
 
 Deploy
 ------
 
-There are two deploy targets and they work together:
+Two targets work together:
 
-- **Render** (full Node service, backend + static UI) — driven by `render.yaml`.
-- **GitHub Pages** (static `public/` only) — driven by
-  `.github/workflows/pages.yml`. The static UI hosted on `*.github.io`
-  automatically calls the Render backend: `public/config.js` points
-  `PROXY_BASE` at `https://checker-account-fb.onrender.com` when running on
-  `github.io`, and at the same origin otherwise.
+- **Render** (full Node service, backend + static UI) — `render.yaml`.
+- **GitHub Pages** (static `public/` only) — `.github/workflows/pages.yml`. On
+  `*.github.io` the static UI calls the Render backend for the Checker via
+  `public/config.js` (`PROXY_BASE`). The 2FA page works on Pages with no
+  backend (fully client-side).
 
 ### Render — single domain (UI + API on one URL)
 
-The site and API run from one URL (e.g. `https://checker-account-fb.onrender.com`).
+1. Open https://dashboard.render.com and sign in (GitHub is easiest).
+2. **New** → **Web Service**, pick the **checker_account_fb** repo, **Connect**.
+3. Settings (usually filled from `render.yaml`): Environment **Node**, Build
+   `npm install`, Start `npm run start`, env `NODE_VERSION=18`.
+4. **Create Web Service**, wait for the deploy (1–3 min).
+5. Open the issued URL — it serves both the UI and the API.
 
-**Step 1.** Open https://dashboard.render.com and sign in (GitHub is easiest).
-
-**Step 2.** Create the service:
-- **New** → **Web Service**.
-- Pick the **checker_account_fb** repo (connect GitHub if it isn't listed yet).
-- **Connect**.
-
-**Step 3.** Settings (usually filled in from `render.yaml`):
-- **Name:** `checker-account-fb` (or anything).
-- **Environment:** Node.
-- **Build Command:** `npm install`
-- **Start Command:** `npm run start`
-- **Environment Variables:** add `NPPR_TOKEN` (required) and `NODE_VERSION=18`.
-
-**Step 4.** **Create Web Service** and wait for the build/deploy (1–3 min).
-
-**Step 5.** Open the issued URL — that single address serves both the UI and the
-account checks.
-
-**Custom domain (optional):** service card → **Settings** → **Custom Domains** →
-Add, then set the CNAME/A records per Render's hints.
+**Custom domain (optional):** service card → **Settings** → **Custom Domains**.
