@@ -401,3 +401,47 @@ button:disabled{opacity:.6;cursor:not-allowed}
   .topbar-inner{padding:6px 12px}
   .toast{left:12px;right:12px;bottom:12px}
 }
+
+/* ========== Плавность интерфейса (anti-jank) ========== */
+html{ scroll-behavior:smooth; }
+
+@keyframes fadeInUp{
+  from{ opacity:0; transform:translateY(8px); }
+  to{ opacity:1; transform:none; }
+}
+
+/* мягкое появление контента и динамических блоков (без резких «прыжков») */
+.container{ animation:fadeInUp .40s ease both; }
+#results{ animation:fadeInUp .34s ease both; }
+.progress-wrap:not(.hidden){ animation:fadeInUp .30s ease both; }
+#stopBtn:not(.hidden){ animation:fadeInUp .20s ease both; }
+.eta-label:not(.hidden){ animation:fadeInUp .25s ease both; }
+.result-link{ animation:fadeInUp .25s ease both;
+  transition:background .18s ease, color .18s ease, border-color .18s ease; }
+
+/* плавные интерактивные состояния (убираем мгновенные переключения цвета) */
+.btn{ transition:background-color .2s ease, color .2s ease, border-color .2s ease, letter-spacing .12s ease; }
+.lang-btn{ transition:outline-color .18s ease, background .18s ease, border-color .18s ease; }
+.icon-btn{ transition:background .18s ease, color .18s ease, border-color .18s ease; }
+.app-nav-link{ transition:background .2s ease, color .2s ease, border-color .2s ease; }
+.upload-zone{ transition:border-color .2s ease, background .2s ease; }
+.otp-code{ transition:background .15s ease, transform .08s ease; }
+
+/* более плавные прогресс-бар и соотношение */
+.progress-bar-fill{ transition:width .30s cubic-bezier(.4,0,.2,1); }
+.ratio-segment{ transition:width .30s cubic-bezier(.4,0,.2,1); }
+.ratio-valid,.ratio-invalid{ transition:width .30s cubic-bezier(.4,0,.2,1); }
+
+/* мягкое затухание прелоадера вместо резкого исчезновения */
+.preloader{ transition:opacity .40s ease, visibility .40s ease; }
+.preloader.hidden{ display:flex; opacity:0; visibility:hidden; pointer-events:none; }
+
+/* уважение к системной настройке «уменьшить движение» */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+    scroll-behavior:auto !important;
+  }
+}
