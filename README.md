@@ -29,9 +29,11 @@ No tokens needed. Optional env vars:
 - `PORT` — defaults to `3000`.
 - `CHECK_URL` — override the upstream checker endpoint (defaults to
   `https://check.fb.tools/api/check/facebook`).
-- `ALLOWED_ORIGINS` — comma-separated CORS allowlist. Unset → all origins
-  allowed (default). Set to lock the API to specific frontends, e.g.
-  `https://checker-account-fb.onrender.com,https://<user>.github.io`.
+- `ALLOWED_ORIGINS` — comma-separated CORS allowlist. **Unset → defaults to the
+  project's prod origins** (`https://ivan14044.github.io`,
+  `https://checker-account-fb.onrender.com`). Requests with no `Origin`
+  (curl/server-to-server) and `localhost`/`127.0.0.1` (dev) are always allowed.
+  Set this to override the list, e.g. when using a custom domain.
 - `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` — per-IP rate limit on the API
   routes (defaults: `60` requests per `60000` ms). `/api/ping` is not limited.
 - `NODE_VERSION` — `18` (set on Render via `render.yaml`).

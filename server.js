@@ -24,15 +24,24 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1); // за прокси Render — чтобы req.ip был реальным
 
-// CORS: по умолчанию открыт; ALLOWED_ORIGINS (через запятую) включает allowlist.
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+// CORS: по умолчанию закрыт фиксированным allowlist прод-доменов (фронт на
+// GitHub Pages + сам Render-домен). Переопределяется env ALLOWED_ORIGINS
+// (через запятую). Запросы без Origin (curl/сервер-сервер) и localhost (dev)
+// разрешены всегда.
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://ivan14044.github.io',
+  'https://checker-account-fb.onrender.com',
+];
+const ENV_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = ENV_ALLOWED_ORIGINS.length ? ENV_ALLOWED_ORIGINS : DEFAULT_ALLOWED_ORIGINS;
+function isOriginAllowed(origin) {
+  if (!origin) return true;                                                       // curl / server-to-server
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;  // локальная разработка
+  return ALLOWED_ORIGINS.includes(origin);
+}
 app.use(cors({
-  origin(origin, cb) {
-    if (!ALLOWED_ORIGINS.length) return cb(null, true); // нет списка → разрешаем всё
-    if (!origin) return cb(null, true);                 // curl / server-to-server
-    cb(null, ALLOWED_ORIGINS.includes(origin));
-  },
+  origin(origin, cb) { cb(null, isOriginAllowed(origin)); },
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));

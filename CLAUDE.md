@@ -22,7 +22,8 @@
   без зависимостей. На фронте (`public/2fa.html` + `2fa.js`) расчёт клиентский
   через Web Crypto — секрет не покидает браузер.
 - **Конфиг:** токены не нужны. Опционально `PORT`, `CHECK_URL`, `NODE_VERSION`,
-  `ALLOWED_ORIGINS` (CORS allowlist через запятую; пусто → всё разрешено),
+  `ALLOWED_ORIGINS` (CORS allowlist через запятую; пусто → фикс. allowlist
+  прод-доменов Pages+Render, плюс всегда localhost и запросы без Origin),
   `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` (по умолчанию 60 / 60000, per-IP на
   `/api/*` кроме `/api/ping`).
 - **Endpoints:** `/api/ping`, `/api/check`, `/api/check/stream` (основной, SSE),
